@@ -1,0 +1,125 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Smooth transitions */
+* {
+  scroll-behavior: smooth;
+}
+
+/* Gradient animation */
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 6s ease infinite;
+}
+
+/* Pulse glow */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.15); }
+  50% { box-shadow: 0 0 40px rgba(99, 102, 241, 0.3); }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Prose overrides for dark theme */
+.prose-custom h1 {
+  color: #a5b4fc;
+  font-size: 1.5rem;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 0.5rem;
+  margin-top: 2rem;
+}
+.prose-custom h2 {
+  color: #c4b5fd;
+  font-size: 1.25rem;
+  margin-top: 1.75rem;
+}
+.prose-custom h3 {
+  color: #e2e8f0;
+  font-size: 1.1rem;
+  margin-top: 1.5rem;
+}
+.prose-custom p {
+  color: #cbd5e1;
+  line-height: 1.75;
+}
+.prose-custom strong {
+  color: #f1f5f9;
+}
+.prose-custom a {
+  color: #818cf8;
+}
+.prose-custom code {
+  color: #e0e7ff;
+  background: #1e293b;
+  border: 1px solid #334155;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.prose-custom pre {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+}
+.prose-custom pre code {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+.prose-custom ul, .prose-custom ol {
+  color: #cbd5e1;
+}
+.prose-custom li {
+  margin: 0.25rem 0;
+}
+.prose-custom table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.prose-custom th, .prose-custom td {
+  border: 1px solid #1e293b;
+  padding: 0.5rem 0.75rem;
+  color: #cbd5e1;
+}
+.prose-custom th {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.prose-custom tr:nth-child(even) {
+  background: rgba(30, 41, 59, 0.4);
+}
+.prose-custom hr {
+  border-color: #1e293b;
+}
+.prose-custom blockquote {
+  border-left-color: #6366f1;
+  color: #94a3b8;
+}

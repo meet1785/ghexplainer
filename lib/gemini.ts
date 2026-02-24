@@ -1,0 +1,424 @@
+/**
+ * Google Gemini API client — Multi-pass LLM Processing.
+ *
+ * Implements the architecture's LLM Processing layer:
+ * 1. Chunk Analysis: analyze each code module independently
+ * 2. Cross-Module Reasoning: identify interactions between modules
+ * 3. Insight Aggregation: synthesize into final structured documentation
+ *
+ * Falls back to single-pass for small repos (≤ 1 chunk).
+ */
+
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { RepoInfo, TreeFile, FileContent } from "./github";
+import type { CodeChunk } from "./chunker";
+import { describeChunks } from "./chunker";
+
+/**
+ * Model fallback chain — ordered by quality & free-tier availability:
+ *
+ * | Model               | Output  | Free RPM | Free RPD  | Notes                          |
+ * |---------------------|---------|----------|-----------|--------------------------------|
+ * | gemini-2.5-flash    | 65,536  | 10       | 500       | Best quality, thinking model   |
+ * | gemini-2.5-flash-lite| 65,536  | 30       | 1,500     | Fastest 2.5, highest free RPM  |
+ * | gemini-2.0-flash    | 8,192   | 15       | 1,500     | Legacy fallback                |
+ *
+ * Strategy: Use 2.5-flash-lite for per-chunk calls (high RPM),
+ *           2.5-flash for synthesis (best quality). Auto-fallback on 429.
+ */
+const MODELS = {
+  primary:   "gemini-2.5-flash",       // Best quality for final synthesis
+  fast:      "gemini-2.5-flash-lite",  // Highest free RPM for chunk analysis
+  fallback:  "gemini-2.0-flash",       // Legacy fallback
+} as const;
+
+const MAX_RETRIES = 3;
+const BASE_RETRY_DELAY_MS = 3000;
+
+// Minimum delay between API calls to avoid bursting the per-minute limit
+// Free tier: ~10-30 RPM → space calls ~3-6s apart
+const INTER_REQUEST_DELAY_MS = 4000;
+let lastRequestTime = 0;
+
+// ─── System Prompts for each analysis pass ───────────────────
+
+const CHUNK_ANALYSIS_PROMPT = `You are a senior software architect analyzing a single code module.
+
+Given the repository context and one module's source files, produce a concise analysis covering:
+- Module purpose and responsibility
+- Key classes/functions/exports
+- Internal data flow
+- External dependencies used
+- Non-obvious design decisions
+- Potential issues or smells
+
+Be precise. Reference specific file names and function names. Do NOT pad with generic explanations.`;
+
+const CROSS_MODULE_PROMPT = `You are a senior software architect performing cross-module reasoning.
+
+Given per-module analyses of a codebase, identify:
+- How modules depend on and communicate with each other
+- The main data flow from entry point to output
+- Shared abstractions or patterns across modules
+- Coupling between modules (tight vs. loose)
+- The dependency graph (which modules are foundational vs. leaf)
+- Any circular dependencies or architectural concerns
+
+Output a structured cross-module analysis. Reference specific module names.`;
+
+const FINAL_SYNTHESIS_PROMPT = `You are a senior software architect and technical writer specializing in understanding unfamiliar codebases quickly and deeply.
+
+You have been given:
+1. Repository metadata
+2. Full file tree
+3. Per-module analyses
+4. A cross-module reasoning analysis
+
+Your task: synthesize all of this into deep, structured, long-form technical documentation.
+
+CRITICAL RULES:
+- Do NOT guess or hallucinate. Only make claims supported by the provided analyses.
+- If something is unclear, state: "This cannot be confirmed from the repository."
+- Be exhaustive on main components. Skip trivial boilerplate.
+- Avoid textbook definitions. Explain THIS repo, not concepts in general.
+- Write for: software engineering candidates, interviewers, and new developers.
+
+OUTPUT FORMAT — Use exactly these sections:
+
+# 1. Repository Overview
+- What this project does
+- Who it is for
+- Real-world use case
+- One-paragraph mental model
+
+# 2. High-Level Architecture
+- Architectural style
+- Major components and interactions
+- Data flow overview (request → processing → response)
+- External dependencies and services
+
+# 3. Folder & Module Breakdown
+For each major folder: purpose, key files, responsibility, why it exists.
+
+# 4. Core Functional Flow
+- Main execution path
+- Entry points
+- How the system starts and operates
+- Step-by-step flow for a typical use case
+
+# 5. APIs & Interfaces
+For each API/interface: name, inputs, outputs, internal flow, error handling.
+
+# 6. Key Business Logic
+- Where the "real logic" lives
+- Important algorithms or rules
+- Non-obvious design decisions and why they likely exist
+
+# 7. Configuration & Environment
+- Environment variables
+- Config files
+- Build/runtime dependencies
+- How behavior changes per environment
+
+# 8. Testing Strategy
+- Types of tests (if present)
+- Coverage and gaps
+- How tests reflect system design
+- If no tests: state that explicitly
+
+# 9. Strengths, Weaknesses & Trade-offs
+- What the repo does well
+- Design limitations
+- Scalability/maintainability concerns
+- What you would improve as a senior engineer
+
+# 10. Interview & Evaluation Notes
+- What an interviewer might ask about this repo
+- What a candidate should explain confidently
+- Red flags or standout points
+
+# 11. Quick Start Mental Map
+"If you remember only 10 things about this repo, remember these:" — bullet list.
+
+Write with the clarity of a senior engineer explaining at a whiteboard. Technical, direct, no fluff.`;
+
+// Single-pass prompt (used for small repos that fit in one call)
+const SINGLE_PASS_PROMPT = FINAL_SYNTHESIS_PROMPT;
+
+export interface GeminiAnalysisInput {
+  repoInfo: RepoInfo;
+  tree: TreeFile[];
+  files: FileContent[];
+  chunks?: CodeChunk[];
+}
+
+export interface AnalysisProgress {
+  phase: "chunk-analysis" | "cross-module" | "synthesis" | "single-pass";
+  current?: number;
+  total?: number;
+  module?: string;
+}
+
+// ─── Helper: call Gemini ─────────────────────────────────────
+
+/**
+ * Rate-limit-aware delay: ensures minimum gap between consecutive API calls.
+ */
+async function rateLimitDelay(): Promise<void> {
+  const now = Date.now();
+  const elapsed = now - lastRequestTime;
+  if (elapsed < INTER_REQUEST_DELAY_MS) {
+    await new Promise((r) => setTimeout(r, INTER_REQUEST_DELAY_MS - elapsed));
+  }
+  lastRequestTime = Date.now();
+}
+
+/**
+ * Parse retry delay from error message if the API provides one.
+ * Falls back to exponential backoff.
+ */
+function getRetryDelay(errorMsg: string, attempt: number): number {
+  // Google often returns: "Please retry in 56.8s"
+  const match = errorMsg.match(/retry in ([\d.]+)s/i);
+  if (match) {
+    return Math.ceil(parseFloat(match[1]) * 1000) + 500; // Add 500ms buffer
+  }
+  // Exponential backoff: 3s, 6s, 12s, 24s
+  return BASE_RETRY_DELAY_MS * Math.pow(2, attempt);
+}
+
+/**
+ * Call Gemini with automatic model fallback and rate-limit retry.
+ *
+ * @param modelPreference - which model tier to prefer: "primary" (quality), "fast" (RPM)
+ */
+async function callGemini(
+  apiKey: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens = 16384,
+  modelPreference: "primary" | "fast" = "primary"
+): Promise<string> {
+  const genAI = new GoogleGenerativeAI(apiKey);
+
+  // Build ordered fallback chain based on preference
+  const modelChain = modelPreference === "fast"
+    ? [MODELS.fast, MODELS.primary, MODELS.fallback]
+    : [MODELS.primary, MODELS.fast, MODELS.fallback];
+
+  for (const modelName of modelChain) {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        await rateLimitDelay();
+
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction: systemPrompt,
+        });
+
+        // Clamp maxTokens to model capability
+        const effectiveMax = modelName.startsWith("gemini-2.5") ? maxTokens : Math.min(maxTokens, 8192);
+
+        const result = await model.generateContent({
+          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: effectiveMax,
+          },
+        });
+
+        const text = result.response.text();
+        if (!text) throw new Error("Gemini returned an empty response.");
+        return text;
+      } catch (err) {
+        const msg = (err as Error).message ?? "";
+        const isRateLimit = msg.includes("429") || msg.includes("quota") || msg.includes("RESOURCE_EXHAUSTED");
+        const isServerError = msg.includes("500") || msg.includes("503");
+        const isRetryable = isRateLimit || isServerError;
+        const isLastAttempt = attempt === MAX_RETRIES;
+
+        if (isRetryable && !isLastAttempt) {
+          const delay = getRetryDelay(msg, attempt);
+          console.log(`[Gemini] ${modelName} attempt ${attempt + 1} failed (${isRateLimit ? '429' : '5xx'}), retrying in ${(delay/1000).toFixed(1)}s...`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+
+        if (isRetryable) {
+          // Exhausted retries for this model — try next in chain
+          console.log(`[Gemini] ${modelName} exhausted ${MAX_RETRIES + 1} attempts, trying next model...`);
+          break;
+        }
+
+        // Non-retryable error (bad request, auth, etc.)
+        throw err;
+      }
+    }
+  }
+
+  throw new Error(
+    "All Gemini models exhausted after retries. The free-tier quota may be fully used. " +
+    "Please wait a few minutes or upgrade to a paid plan."
+  );
+}
+
+// ─── Build prompts ───────────────────────────────────────────
+
+function buildRepoContext(input: GeminiAnalysisInput): string {
+  const { repoInfo, tree } = input;
+  const treeText = tree
+    .map((f) => `${f.type === "tree" ? "📁" : "📄"} ${f.path}`)
+    .join("\n");
+
+  return `## Repository: ${repoInfo.owner}/${repoInfo.repo}
+**Description:** ${repoInfo.description || "(none)"}
+**Primary Language:** ${repoInfo.language || "unknown"}
+**Stars:** ${repoInfo.stars}
+**Topics:** ${repoInfo.topics.join(", ") || "(none)"}
+**Created:** ${repoInfo.createdAt}
+**Last Updated:** ${repoInfo.updatedAt}
+**Default Branch:** ${repoInfo.defaultBranch}
+
+## Full File Tree (${tree.length} entries)
+\`\`\`
+${treeText}
+\`\`\``;
+}
+
+function buildChunkPrompt(repoContext: string, chunk: CodeChunk): string {
+  const filesText = chunk.files
+    .map((f) => `\n${"=".repeat(50)}\nFILE: ${f.path}\n${"=".repeat(50)}\n${f.content}`)
+    .join("\n");
+
+  return `${repoContext}
+
+---
+
+## Module: ${chunk.module}
+Files: ${chunk.files.length} | Chars: ${chunk.totalChars.toLocaleString()}
+Dependencies: ${chunk.dependencies.join(", ") || "(none)"}
+
+${filesText}
+
+---
+Analyze this module thoroughly.`;
+}
+
+function buildSinglePassPrompt(input: GeminiAnalysisInput): string {
+  const repoContext = buildRepoContext(input);
+  const filesText = input.files
+    .map((f) => `\n${"=".repeat(50)}\nFILE: ${f.path}\n${"=".repeat(50)}\n${f.content}`)
+    .join("\n");
+
+  return `${repoContext}
+
+---
+
+## File Contents (${input.files.length} files)
+
+${filesText}
+
+---
+Produce the full structured technical documentation.`;
+}
+
+// ─── Multi-pass analysis ─────────────────────────────────────
+
+/**
+ * Run multi-pass Gemini analysis:
+ * Pass 1: Analyze each chunk independently
+ * Pass 2: Cross-module reasoning
+ * Pass 3: Final synthesis
+ */
+export async function analyzeWithGemini(
+  input: GeminiAnalysisInput,
+  apiKey?: string,
+  onProgress?: (p: AnalysisProgress) => void
+): Promise<string> {
+  const key = apiKey ?? process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("GEMINI_API_KEY is not set. Please add it to your .env.local file.");
+  }
+
+  const chunks = input.chunks;
+
+  // ── Small repo: single pass ──
+  if (!chunks || chunks.length <= 1) {
+    onProgress?.({ phase: "single-pass" });
+    return callGemini(key, SINGLE_PASS_PROMPT, buildSinglePassPrompt(input));
+  }
+
+  // ── Large repo: multi-pass ──
+  const repoContext = buildRepoContext(input);
+
+  // Pass 1: Chunk Analysis
+  const chunkAnalyses: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    onProgress?.({
+      phase: "chunk-analysis",
+      current: i + 1,
+      total: chunks.length,
+      module: chunk.module,
+    });
+    const analysis = await callGemini(
+      key,
+      CHUNK_ANALYSIS_PROMPT,
+      buildChunkPrompt(repoContext, chunk),
+      4096,
+      "fast"  // Use high-RPM model for per-chunk analysis
+    );
+    chunkAnalyses.push(`### Module: ${chunk.module}\n\n${analysis}`);
+  }
+
+  // Pass 2: Cross-Module Reasoning
+  onProgress?.({ phase: "cross-module" });
+  const chunkSummary = describeChunks(chunks);
+  const crossModulePrompt = `${repoContext}
+
+---
+
+${chunkSummary}
+
+---
+
+## Per-Module Analyses
+
+${chunkAnalyses.join("\n\n---\n\n")}
+
+---
+Now perform cross-module reasoning as instructed.`;
+
+  const crossModuleAnalysis = await callGemini(
+    key,
+    CROSS_MODULE_PROMPT,
+    crossModulePrompt,
+    8192,
+    "fast"  // Cross-module can use fast model
+  );
+
+  // Pass 3: Final Synthesis (Insight Aggregation)
+  onProgress?.({ phase: "synthesis" });
+  const synthesisPrompt = `${repoContext}
+
+---
+
+${chunkSummary}
+
+---
+
+## Per-Module Analyses
+
+${chunkAnalyses.join("\n\n---\n\n")}
+
+---
+
+## Cross-Module Analysis
+
+${crossModuleAnalysis}
+
+---
+Now synthesize everything into the final structured documentation following the output format exactly.`;
+
+  return callGemini(key, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 16384, "primary");
+}
