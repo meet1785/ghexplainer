@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import RepoForm from "@/components/RepoForm";
+import type { AnalysisMode } from "@/components/RepoForm";
 import LoadingState from "@/components/LoadingState";
 import AnalysisOutput from "@/components/AnalysisOutput";
 import type { RepoInfo } from "@/lib/github";
@@ -68,6 +69,87 @@ export default function Home() {
   const resultRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [lastUrl, setLastUrl] = useState<string>("");
+  const [lastMode, setLastMode] = useState<AnalysisMode>("stream");
+
+  /**
+   * Complete mode: POST to /api/analyze, wait for full result.
+   * More reliable for large repos — no streaming interruption risk.
+   */
+  const handleAnalyzeComplete = useCallback(async (url: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setState("loading");
+    setErrorMsg("");
+    setResult(null);
+    setLastUrl(url);
+    setLastMode("complete");
+
+    const STEP_MESSAGES = [
+      "Fetching repository metadata…",
+      "Downloading source files…",
+      "Analyzing code structure…",
+      "Running multi-pass AI analysis…",
+      "Synthesizing documentation…",
+      "Almost there — finalizing…",
+    ];
+
+    let stepIdx = 0;
+    setCurrentStep(STEP_MESSAGES[0]);
+    const stepInterval = setInterval(() => {
+      stepIdx = Math.min(stepIdx + 1, STEP_MESSAGES.length - 1);
+      setCurrentStep(STEP_MESSAGES[stepIdx]);
+    }, 15_000);
+
+    // 5 min client-side timeout
+    const timeoutId = setTimeout(() => controller.abort(), 300_000);
+
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      clearInterval(stepInterval);
+
+      if (!res.ok) {
+        const text = await res.text();
+        let msg: string;
+        try { msg = JSON.parse(text).error; } catch { msg = `HTTP ${res.status}: ${text.slice(0, 200)}`; }
+        throw new Error(msg);
+      }
+
+      const data = await res.json();
+      setState("done");
+      setResult({
+        markdown: data.markdown,
+        repoInfo: data.repoInfo,
+        filesAnalyzed: data.filesAnalyzed,
+        chunks: data.chunks,
+        durationMs: data.durationMs,
+        cached: data.cached,
+        complete: true,
+        phase: "complete",
+      });
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    } catch (e) {
+      clearTimeout(timeoutId);
+      clearInterval(stepInterval);
+      const msg = (e as Error).message ?? "Something went wrong.";
+      setErrorMsg(
+        msg.includes("aborted")
+          ? "Request timed out. The repository may be very large. Try Stream mode for partial results, or try again later."
+          : msg
+      );
+      setState("error");
+    }
+  }, []);
 
   /**
    * Parse an NDJSON stream line-by-line.
@@ -84,6 +166,7 @@ export default function Home() {
     setResult(null);
     setCurrentStep("Connecting…");
     setLastUrl(url);
+    setLastMode("stream");
 
     // Partial results accumulator
     let partialMarkdown = "";
@@ -247,12 +330,22 @@ export default function Home() {
     setErrorMsg("");
     setCurrentStep("");
     setLastUrl("");
+    setLastMode("stream");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleRetry = useCallback(() => {
-    if (lastUrl) handleAnalyze(lastUrl);
-  }, [lastUrl, handleAnalyze]);
+    if (lastUrl) {
+      if (lastMode === "complete") handleAnalyzeComplete(lastUrl);
+      else handleAnalyze(lastUrl);
+    }
+  }, [lastUrl, lastMode, handleAnalyze, handleAnalyzeComplete]);
+
+  /** Dispatch to the right handler based on selected mode */
+  const handleSubmit = useCallback((url: string, mode: AnalysisMode) => {
+    if (mode === "complete") handleAnalyzeComplete(url);
+    else handleAnalyze(url);
+  }, [handleAnalyze, handleAnalyzeComplete]);
 
   return (
     <main className="min-h-screen bg-[#030712] text-gray-100">
@@ -291,7 +384,7 @@ export default function Home() {
           {/* ─── Input Form ─── */}
           {(state === "idle" || state === "error") && (
             <div className="w-full max-w-2xl">
-              <RepoForm onSubmit={handleAnalyze} loading={false} />
+              <RepoForm onSubmit={handleSubmit} loading={false} />
             </div>
           )}
 

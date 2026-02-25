@@ -36,8 +36,8 @@ const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 3000;
 
 // Minimum delay between API calls to avoid bursting the per-minute limit
-// Free tier: ~10-30 RPM → space calls ~3-6s apart
-const INTER_REQUEST_DELAY_MS = 4000;
+// Free tier: ~10-30 RPM → space calls ~6s apart for safety
+const INTER_REQUEST_DELAY_MS = 6000;
 let lastRequestTime = 0;
 
 // ─── System Prompts for each analysis pass ───────────────────
@@ -54,17 +54,7 @@ Given the repository context and one module's source files, produce a concise an
 
 Be precise. Reference specific file names and function names. Do NOT pad with generic explanations.`;
 
-const CROSS_MODULE_PROMPT = `You are a senior software architect performing cross-module reasoning.
-
-Given per-module analyses of a codebase, identify:
-- How modules depend on and communicate with each other
-- The main data flow from entry point to output
-- Shared abstractions or patterns across modules
-- Coupling between modules (tight vs. loose)
-- The dependency graph (which modules are foundational vs. leaf)
-- Any circular dependencies or architectural concerns
-
-Output a structured cross-module analysis. Reference specific module names.`;
+// Cross-module reasoning is now integrated into FINAL_SYNTHESIS_PROMPT (saves 1 API call)
 
 const FINAL_SYNTHESIS_PROMPT = `You are a senior software architect and technical writer specializing in understanding unfamiliar codebases quickly and deeply.
 
@@ -72,9 +62,10 @@ You have been given:
 1. Repository metadata
 2. Full file tree
 3. Per-module analyses
-4. A cross-module reasoning analysis
 
-Your task: synthesize all of this into deep, structured, long-form technical documentation.
+Your task:
+- FIRST, perform cross-module reasoning: identify how modules interact, the main data flow, shared patterns, coupling, and the dependency graph.
+- THEN, synthesize everything into deep, structured, long-form technical documentation.
 
 CRITICAL RULES:
 - Do NOT guess or hallucinate. Only make claims supported by the provided analyses.
@@ -322,13 +313,40 @@ ${filesText}
 Produce the full structured technical documentation.`;
 }
 
+// ─── Backend document formatter (no API calls) ──────────────
+
+/**
+ * Format chunk analyses into a structured document WITHOUT calling the API.
+ * Used as:
+ * 1. Progressive partial display during streaming
+ * 2. Fallback if final synthesis fails
+ */
+export function formatChunkAnalyses(
+  repoInfo: { owner: string; repo: string; description?: string | null; language?: string | null; stars: number },
+  chunkAnalyses: string[],
+  totalChunks: number,
+  completedChunks: number,
+  isFinal = false
+): string {
+  const header = isFinal
+    ? `# ${repoInfo.owner}/${repoInfo.repo} — Analysis Report\n\n` +
+      `> ${repoInfo.description || "No description"} | ${repoInfo.language || "Unknown language"} | ⭐ ${repoInfo.stars.toLocaleString()}\n\n` +
+      `**${completedChunks} modules analyzed** — backend-formatted summary (synthesis pass was skipped to save API calls)\n\n---\n`
+    : `# ${repoInfo.owner}/${repoInfo.repo} — Analysis in Progress\n\n` +
+      `> ${repoInfo.description || "No description"} | ${repoInfo.language || "Unknown language"} | ⭐ ${repoInfo.stars.toLocaleString()}\n\n` +
+      `**${completedChunks} of ${totalChunks} modules analyzed** — results update as each module completes.\n\n---\n`;
+
+  return header + "\n\n" + chunkAnalyses.join("\n\n---\n\n");
+}
+
 // ─── Multi-pass analysis ─────────────────────────────────────
 
 /**
- * Run multi-pass Gemini analysis:
- * Pass 1: Analyze each chunk independently
- * Pass 2: Cross-module reasoning
- * Pass 3: Final synthesis
+ * Run multi-pass Gemini analysis (optimized: 2 passes instead of 3):
+ * Pass 1: Analyze each chunk independently (N calls, fast model)
+ * Pass 2: Combined cross-module reasoning + final synthesis (1 call, primary model)
+ *
+ * Total API calls: N+1 (was N+2)
  */
 export async function analyzeWithGemini(
   input: GeminiAnalysisInput,
@@ -348,10 +366,10 @@ export async function analyzeWithGemini(
     return callGemini(key, SINGLE_PASS_PROMPT, buildSinglePassPrompt(input));
   }
 
-  // ── Large repo: multi-pass ──
+  // ── Large repo: multi-pass (optimized: N+1 calls) ──
   const repoContext = buildRepoContext(input);
 
-  // Pass 1: Chunk Analysis
+  // Pass 1: Chunk Analysis (N calls, fast model)
   const chunkAnalyses: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -371,34 +389,10 @@ export async function analyzeWithGemini(
     chunkAnalyses.push(`### Module: ${chunk.module}\n\n${analysis}`);
   }
 
-  // Pass 2: Cross-Module Reasoning
-  onProgress?.({ phase: "cross-module" });
-  const chunkSummary = describeChunks(chunks);
-  const crossModulePrompt = `${repoContext}
-
----
-
-${chunkSummary}
-
----
-
-## Per-Module Analyses
-
-${chunkAnalyses.join("\n\n---\n\n")}
-
----
-Now perform cross-module reasoning as instructed.`;
-
-  const crossModuleAnalysis = await callGemini(
-    key,
-    CROSS_MODULE_PROMPT,
-    crossModulePrompt,
-    8192,
-    "fast"  // Cross-module can use fast model
-  );
-
-  // Pass 3: Final Synthesis (Insight Aggregation)
+  // Pass 2: Combined cross-module reasoning + final synthesis (1 call, primary model)
+  // This saves 1 API call vs the old 3-pass approach
   onProgress?.({ phase: "synthesis" });
+  const chunkSummary = describeChunks(chunks);
   const synthesisPrompt = `${repoContext}
 
 ---
@@ -412,13 +406,7 @@ ${chunkSummary}
 ${chunkAnalyses.join("\n\n---\n\n")}
 
 ---
-
-## Cross-Module Analysis
-
-${crossModuleAnalysis}
-
----
-Now synthesize everything into the final structured documentation following the output format exactly.`;
+First perform cross-module reasoning (how modules interact, main data flow, dependency graph), then synthesize everything into the final structured documentation following the output format exactly.`;
 
   return callGemini(key, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 16384, "primary");
 }
@@ -453,9 +441,17 @@ export async function* analyzeWithGeminiStream(
     return;
   }
 
-  // ── Large repo: multi-pass with partial yields ──
+  // ── Large repo: multi-pass with partial yields (optimized: N+1 calls) ──
   const repoContext = buildRepoContext(input);
-  let accumulatedMarkdown = "";
+
+  // Extract repo info for formatChunkAnalyses
+  const repoInfo = {
+    owner: input.repoInfo.owner,
+    repo: input.repoInfo.repo,
+    description: input.repoInfo.description,
+    language: input.repoInfo.language,
+    stars: input.repoInfo.stars,
+  };
 
   // Pass 1: Chunk Analysis — yield partial markdown after each chunk
   const chunkAnalyses: string[] = [];
@@ -475,61 +471,18 @@ export async function* analyzeWithGeminiStream(
     );
     chunkAnalyses.push(`### Module: ${chunk.module}\n\n${analysis}`);
 
-    // Yield accumulating partial markdown so the client has something to show
-    accumulatedMarkdown =
-      `# Partial Analysis — Module Reports\n\n` +
-      `_Analysis in progress… ${i + 1}/${chunks.length} modules analyzed._\n\n---\n\n` +
-      chunkAnalyses.join("\n\n---\n\n");
-
+    // Yield professional partial markdown using backend formatter (no API call)
     yield {
       type: "partial",
-      markdown: accumulatedMarkdown,
+      markdown: formatChunkAnalyses(repoInfo, chunkAnalyses, chunks.length, i + 1, false),
       phase: `chunk-${i + 1}/${chunks.length}`,
       complete: false,
     };
   }
 
-  // Pass 2: Cross-Module Reasoning
-  yield { type: "progress", step: "Cross-module reasoning…" };
-  const chunkSummary = describeChunks(chunks);
-  const crossModulePrompt = `${repoContext}
-
----
-
-${chunkSummary}
-
----
-
-## Per-Module Analyses
-
-${chunkAnalyses.join("\n\n---\n\n")}
-
----
-Now perform cross-module reasoning as instructed.`;
-
-  const crossModuleAnalysis = await callGemini(
-    key,
-    CROSS_MODULE_PROMPT,
-    crossModulePrompt,
-    8192,
-    "fast"
-  );
-
-  accumulatedMarkdown =
-    `# Partial Analysis — Cross-Module Report\n\n` +
-    `_Synthesizing final documentation…_\n\n---\n\n` +
-    `## Cross-Module Analysis\n\n${crossModuleAnalysis}\n\n---\n\n` +
-    `## Per-Module Analyses\n\n${chunkAnalyses.join("\n\n---\n\n")}`;
-
-  yield {
-    type: "partial",
-    markdown: accumulatedMarkdown,
-    phase: "cross-module",
-    complete: false,
-  };
-
-  // Pass 3: Final Synthesis
+  // Pass 2: Combined cross-module reasoning + final synthesis (1 call, primary model)
   yield { type: "progress", step: "Synthesizing final documentation…" };
+  const chunkSummary = describeChunks(chunks);
   const synthesisPrompt = `${repoContext}
 
 ---
@@ -543,15 +496,16 @@ ${chunkSummary}
 ${chunkAnalyses.join("\n\n---\n\n")}
 
 ---
+First perform cross-module reasoning (how modules interact, main data flow, dependency graph), then synthesize everything into the final structured documentation following the output format exactly.`;
 
-## Cross-Module Analysis
-
-${crossModuleAnalysis}
-
----
-Now synthesize everything into the final structured documentation following the output format exactly.`;
-
-  const finalMarkdown = await callGemini(key, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 16384, "primary");
+  let finalMarkdown: string;
+  try {
+    finalMarkdown = await callGemini(key, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 16384, "primary");
+  } catch (err) {
+    // If synthesis fails (rate limit, timeout), fall back to backend-formatted output
+    console.error("[ghexplainer] Synthesis call failed, using backend formatter:", err);
+    finalMarkdown = formatChunkAnalyses(repoInfo, chunkAnalyses, chunks.length, chunks.length, true);
+  }
 
   yield {
     type: "partial",

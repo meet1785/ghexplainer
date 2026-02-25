@@ -2,8 +2,10 @@
 
 import { useState, FormEvent } from "react";
 
+export type AnalysisMode = "stream" | "complete";
+
 interface RepoFormProps {
-  onSubmit: (url: string) => void;
+  onSubmit: (url: string, mode: AnalysisMode) => void;
   loading: boolean;
 }
 
@@ -16,11 +18,12 @@ const EXAMPLES = [
 
 export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
   const [url, setUrl] = useState("");
+  const [mode, setMode] = useState<AnalysisMode>("stream");
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const trimmed = url.trim();
-    if (trimmed) onSubmit(trimmed);
+    if (trimmed) onSubmit(trimmed, mode);
   };
 
   return (
@@ -60,6 +63,42 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
               "Analyze →"
             )}
           </button>
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-gray-600 uppercase tracking-wide font-medium">Mode:</span>
+          <div className="flex rounded-lg border border-gray-800/50 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMode("stream")}
+              disabled={loading}
+              className={`flex items-center gap-1.5 text-xs px-3.5 py-1.5 transition-all duration-200 ${
+                mode === "stream"
+                  ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"
+                  : "bg-gray-900/30 text-gray-500 hover:text-gray-300"
+              } disabled:opacity-40`}
+            >
+              <span>⚡</span>
+              <span>Stream</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("complete")}
+              disabled={loading}
+              className={`flex items-center gap-1.5 text-xs px-3.5 py-1.5 border-l border-gray-800/50 transition-all duration-200 ${
+                mode === "complete"
+                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                  : "bg-gray-900/30 text-gray-500 hover:text-gray-300"
+              } disabled:opacity-40`}
+            >
+              <span>📋</span>
+              <span>Complete</span>
+            </button>
+          </div>
+          <span className="text-[10px] text-gray-600">
+            {mode === "stream" ? "Live progress as modules are analyzed" : "Waits for full result — more reliable for large repos"}
+          </span>
         </div>
 
         {/* Example repos */}
