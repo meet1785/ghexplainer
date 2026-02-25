@@ -12,7 +12,22 @@ interface AnalysisOutputProps {
   chunks: number;
   durationMs: number;
   cached: boolean;
+  /** Whether the analysis has fully completed */
+  complete: boolean;
+  /** Current analysis phase (e.g. "chunk-3/7", "cross-module", "complete") */
+  phase: string;
   onReset: () => void;
+  /** Retry/continue the analysis */
+  onRetry?: () => void;
+}
+
+/** User-friendly phase label */
+function phaseLabel(phase: string): string {
+  if (!phase || phase === "complete") return "";
+  if (phase === "cross-module") return "Cross-module reasoning";
+  if (phase === "interrupted") return "Connection interrupted";
+  if (phase.startsWith("chunk-")) return `Module analysis (${phase.replace("chunk-", "")})`;
+  return phase;
 }
 
 export default function AnalysisOutput({
@@ -22,9 +37,13 @@ export default function AnalysisOutput({
   chunks,
   durationMs,
   cached,
+  complete,
+  phase,
   onReset,
+  onRetry,
 }: AnalysisOutputProps) {
   const [copied, setCopied] = useState(false);
+  const isStreaming = !complete && phase !== "complete";
 
   const handleCopyMarkdown = async () => {
     await navigator.clipboard.writeText(markdown);
@@ -67,6 +86,11 @@ export default function AnalysisOutput({
                   CACHED
                 </span>
               )}
+              {isStreaming && (
+                <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded animate-pulse">
+                  STREAMING
+                </span>
+              )}
             </div>
           </div>
 
@@ -76,7 +100,7 @@ export default function AnalysisOutput({
             {repoInfo.language && <span>• {repoInfo.language}</span>}
             <span>• {filesAnalyzed} files</span>
             <span>• {chunks} chunks</span>
-            <span>• {(durationMs / 1000).toFixed(1)}s</span>
+            {durationMs > 0 && <span>• {(durationMs / 1000).toFixed(1)}s</span>}
           </div>
 
           {/* Actions */}
@@ -142,6 +166,40 @@ export default function AnalysisOutput({
 
       {/* Rendered markdown */}
       <div className="max-w-4xl mx-auto px-6 pb-16">
+        {/* Streaming in-progress banner */}
+        {isStreaming && (
+          <div className="mb-4 p-4 rounded-xl bg-amber-950/30 border border-amber-800/30 flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-200">Analysis in progress…</p>
+              {phaseLabel(phase) && (
+                <p className="text-xs text-amber-400/70 mt-0.5">Current step: {phaseLabel(phase)}</p>
+              )}
+              <p className="text-xs text-amber-400/50 mt-0.5">Partial results shown below — updates as more modules complete.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Incomplete analysis banner (connection dropped) */}
+        {!complete && phase === "interrupted" && (
+          <div className="mb-4 p-4 rounded-xl bg-orange-950/30 border border-orange-800/30 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-orange-400 text-lg">⚠️</span>
+              <div>
+                <p className="text-sm font-medium text-orange-200">Response is incomplete</p>
+                <p className="text-xs text-orange-400/70 mt-0.5">Connection was interrupted. Partial results shown below.</p>
+              </div>
+            </div>
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="shrink-0 text-xs px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white transition-colors"
+              >
+                Retry Full Analysis
+              </button>
+            )}
+          </div>
+        )}
         <article className="prose-custom prose prose-invert prose-sm max-w-none p-8 sm:p-10 rounded-2xl bg-gray-950/50 border border-gray-800/30">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {markdown}

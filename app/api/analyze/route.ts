@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { analyzeRepo } from "@/lib/analyzer";
 import { parseGitHubUrl } from "@/lib/github";
 
-export const maxDuration = 120; // Vercel: allow up to 120s for AI response
+export const maxDuration = 180; // Vercel: allow up to 180s for AI response
 
 export async function POST(req: NextRequest) {
   let url: string;
@@ -76,3 +76,6 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// Force dynamic rendering (avoid static optimization timeout)
+export const dynamic = "force-dynamic";

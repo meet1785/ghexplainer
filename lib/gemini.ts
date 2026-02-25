@@ -422,3 +422,141 @@ Now synthesize everything into the final structured documentation following the 
 
   return callGemini(key, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 16384, "primary");
 }
+
+// ─── Streaming analysis (yields partial results) ─────────────
+
+export type GeminiStreamEvent =
+  | { type: "progress"; step: string }
+  | { type: "partial"; markdown: string; phase: string; complete: boolean };
+
+/**
+ * Streaming multi-pass analysis — yields partial markdown after each phase.
+ * The client receives something displayable after every Gemini call,
+ * so even if the connection drops, the user has useful output.
+ */
+export async function* analyzeWithGeminiStream(
+  input: GeminiAnalysisInput,
+  apiKey?: string
+): AsyncGenerator<GeminiStreamEvent> {
+  const key = apiKey ?? process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("GEMINI_API_KEY is not set. Please add it to your .env.local file.");
+  }
+
+  const chunks = input.chunks;
+
+  // ── Small repo: single pass ──
+  if (!chunks || chunks.length <= 1) {
+    yield { type: "progress", step: "Generating documentation (single-pass)…" };
+    const markdown = await callGemini(key, SINGLE_PASS_PROMPT, buildSinglePassPrompt(input));
+    yield { type: "partial", markdown, phase: "complete", complete: true };
+    return;
+  }
+
+  // ── Large repo: multi-pass with partial yields ──
+  const repoContext = buildRepoContext(input);
+  let accumulatedMarkdown = "";
+
+  // Pass 1: Chunk Analysis — yield partial markdown after each chunk
+  const chunkAnalyses: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    yield {
+      type: "progress",
+      step: `Analyzing module ${i + 1}/${chunks.length}: ${chunk.module}…`,
+    };
+
+    const analysis = await callGemini(
+      key,
+      CHUNK_ANALYSIS_PROMPT,
+      buildChunkPrompt(repoContext, chunk),
+      4096,
+      "fast"
+    );
+    chunkAnalyses.push(`### Module: ${chunk.module}\n\n${analysis}`);
+
+    // Yield accumulating partial markdown so the client has something to show
+    accumulatedMarkdown =
+      `# Partial Analysis — Module Reports\n\n` +
+      `_Analysis in progress… ${i + 1}/${chunks.length} modules analyzed._\n\n---\n\n` +
+      chunkAnalyses.join("\n\n---\n\n");
+
+    yield {
+      type: "partial",
+      markdown: accumulatedMarkdown,
+      phase: `chunk-${i + 1}/${chunks.length}`,
+      complete: false,
+    };
+  }
+
+  // Pass 2: Cross-Module Reasoning
+  yield { type: "progress", step: "Cross-module reasoning…" };
+  const chunkSummary = describeChunks(chunks);
+  const crossModulePrompt = `${repoContext}
+
+---
+
+${chunkSummary}
+
+---
+
+## Per-Module Analyses
+
+${chunkAnalyses.join("\n\n---\n\n")}
+
+---
+Now perform cross-module reasoning as instructed.`;
+
+  const crossModuleAnalysis = await callGemini(
+    key,
+    CROSS_MODULE_PROMPT,
+    crossModulePrompt,
+    8192,
+    "fast"
+  );
+
+  accumulatedMarkdown =
+    `# Partial Analysis — Cross-Module Report\n\n` +
+    `_Synthesizing final documentation…_\n\n---\n\n` +
+    `## Cross-Module Analysis\n\n${crossModuleAnalysis}\n\n---\n\n` +
+    `## Per-Module Analyses\n\n${chunkAnalyses.join("\n\n---\n\n")}`;
+
+  yield {
+    type: "partial",
+    markdown: accumulatedMarkdown,
+    phase: "cross-module",
+    complete: false,
+  };
+
+  // Pass 3: Final Synthesis
+  yield { type: "progress", step: "Synthesizing final documentation…" };
+  const synthesisPrompt = `${repoContext}
+
+---
+
+${chunkSummary}
+
+---
+
+## Per-Module Analyses
+
+${chunkAnalyses.join("\n\n---\n\n")}
+
+---
+
+## Cross-Module Analysis
+
+${crossModuleAnalysis}
+
+---
+Now synthesize everything into the final structured documentation following the output format exactly.`;
+
+  const finalMarkdown = await callGemini(key, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 16384, "primary");
+
+  yield {
+    type: "partial",
+    markdown: finalMarkdown,
+    phase: "complete",
+    complete: true,
+  };
+}

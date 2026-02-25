@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import RepoForm from "@/components/RepoForm";
 import LoadingState from "@/components/LoadingState";
 import AnalysisOutput from "@/components/AnalysisOutput";
@@ -15,6 +15,10 @@ interface AnalysisData {
   chunks: number;
   durationMs: number;
   cached: boolean;
+  /** Whether the analysis completed fully or was cut short */
+  complete: boolean;
+  /** Current phase label for streaming UI */
+  phase: string;
 }
 
 const FEATURES = [
@@ -62,62 +66,193 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisData | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const resultRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [lastUrl, setLastUrl] = useState<string>("");
 
-  const handleAnalyze = async (url: string) => {
+  /**
+   * Parse an NDJSON stream line-by-line.
+   * Uses fetch + getReader() (NOT EventSource) for maximum control.
+   */
+  const handleAnalyze = useCallback(async (url: string) => {
+    // Abort any previous request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setState("loading");
     setErrorMsg("");
     setResult(null);
-    setCurrentStep("Parsing repository URL…");
+    setCurrentStep("Connecting…");
+    setLastUrl(url);
 
-    const steps = [
-      { delay: 500, msg: "Fetching metadata from GitHub…" },
-      { delay: 2000, msg: "Walking file tree…" },
-      { delay: 4000, msg: "Reading source files…" },
-      { delay: 7000, msg: "Chunking code by module…" },
-      { delay: 10000, msg: "Analyzing modules with Gemini…" },
-      { delay: 20000, msg: "Cross-module reasoning…" },
-      { delay: 35000, msg: "Synthesizing final documentation…" },
-    ];
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    steps.forEach(({ delay, msg }) => {
-      timers.push(setTimeout(() => setCurrentStep(msg), delay));
-    });
+    // Partial results accumulator
+    let partialMarkdown = "";
+    let repoInfo: RepoInfo | null = null;
+    let filesAnalyzed = 0;
+    let chunks = 0;
+    let hasShownResult = false;
+
+    // Client-side timeout (5 min)
+    const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
     try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
+      const res = await fetch(
+        `/api/analyze/stream?url=${encodeURIComponent(url)}`,
+        { signal: controller.signal }
+      );
 
-      timers.forEach(clearTimeout);
-
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error ?? `HTTP ${res.status}`);
+        const text = await res.text();
+        let msg: string;
+        try {
+          msg = JSON.parse(text).error;
+        } catch {
+          msg = `HTTP ${res.status}: ${text.slice(0, 200)}`;
+        }
+        throw new Error(msg);
       }
 
-      setResult(data);
-      setState("done");
+      if (!res.body) throw new Error("No response body");
 
-      // Scroll to result
-      setTimeout(() => {
-        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 100);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete lines
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? ""; // keep incomplete line in buffer
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          let event;
+          try {
+            event = JSON.parse(trimmed);
+          } catch {
+            continue; // skip malformed lines
+          }
+
+          switch (event.type) {
+            case "heartbeat":
+              // Keep-alive — no action needed
+              break;
+
+            case "progress":
+              setCurrentStep(event.step ?? "");
+              break;
+
+            case "meta":
+              repoInfo = event.repoInfo;
+              filesAnalyzed = event.filesAnalyzed ?? 0;
+              chunks = event.chunks ?? 0;
+              break;
+
+            case "partial":
+              partialMarkdown = event.markdown ?? "";
+              // Show result immediately on first partial
+              if (repoInfo && !hasShownResult) {
+                hasShownResult = true;
+                setState("done");
+                setResult({
+                  markdown: partialMarkdown,
+                  repoInfo,
+                  filesAnalyzed,
+                  chunks,
+                  durationMs: 0,
+                  cached: false,
+                  complete: event.complete ?? false,
+                  phase: event.phase ?? "",
+                });
+                setTimeout(() => {
+                  resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, 100);
+              } else if (hasShownResult) {
+                // Update existing result with newer markdown
+                setResult((prev) =>
+                  prev
+                    ? { ...prev, markdown: partialMarkdown, complete: event.complete ?? false, phase: event.phase ?? "" }
+                    : prev
+                );
+              }
+              break;
+
+            case "done":
+              clearTimeout(timeoutId);
+              if (repoInfo) {
+                setResult({
+                  markdown: event.markdown ?? partialMarkdown,
+                  repoInfo,
+                  filesAnalyzed,
+                  chunks,
+                  durationMs: event.durationMs ?? 0,
+                  cached: event.cached ?? false,
+                  complete: true,
+                  phase: "complete",
+                });
+              }
+              setState("done");
+              break;
+
+            case "error":
+              throw new Error(event.message ?? "Analysis failed");
+          }
+        }
+      }
+
+      clearTimeout(timeoutId);
+
+      // If we never got a result from the stream, something went wrong
+      if (!hasShownResult && !result) {
+        throw new Error("Stream ended without producing any output. Please try again.");
+      }
     } catch (e) {
-      timers.forEach(clearTimeout);
-      setErrorMsg((e as Error).message || "Something went wrong.");
-      setState("error");
+      clearTimeout(timeoutId);
+      const msg = (e as Error).message ?? "Something went wrong.";
+
+      // If we have partial results, show them instead of an error
+      if (partialMarkdown && repoInfo) {
+        setResult({
+          markdown: partialMarkdown,
+          repoInfo,
+          filesAnalyzed,
+          chunks,
+          durationMs: 0,
+          cached: false,
+          complete: false,
+          phase: "interrupted",
+        });
+        setState("done");
+      } else {
+        setErrorMsg(
+          msg.includes("aborted")
+            ? "Request timed out. The repository may be very large or the AI service is busy. Please try again."
+            : msg
+        );
+        setState("error");
+      }
     }
-  };
+  }, [result]);
 
   const handleReset = () => {
+    abortRef.current?.abort();
     setState("idle");
     setResult(null);
     setErrorMsg("");
     setCurrentStep("");
+    setLastUrl("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const handleRetry = useCallback(() => {
+    if (lastUrl) handleAnalyze(lastUrl);
+  }, [lastUrl, handleAnalyze]);
 
   return (
     <main className="min-h-screen bg-[#030712] text-gray-100">
@@ -188,7 +323,10 @@ export default function Home() {
             chunks={result.chunks}
             durationMs={result.durationMs}
             cached={result.cached}
+            complete={result.complete}
+            phase={result.phase}
             onReset={handleReset}
+            onRetry={handleRetry}
           />
         </div>
       )}

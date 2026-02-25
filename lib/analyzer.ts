@@ -19,7 +19,7 @@ import {
   type FileContent,
 } from "./github";
 import { chunkByModule, type CodeChunk } from "./chunker";
-import { analyzeWithGemini } from "./gemini";
+import { analyzeWithGemini, analyzeWithGeminiStream } from "./gemini";
 import { analysisCache } from "./cache";
 
 export interface AnalysisResult {
@@ -137,4 +137,92 @@ export async function analyzeRepo(
   analysisCache.set(cacheKey, result);
 
   return result;
+}
+
+// ─── SSE / NDJSON streaming types ────────────────────────────
+
+/**
+ * Event types sent to the client during streaming analysis.
+ */
+export type StreamEvent =
+  | { type: "progress"; step: string }
+  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number }
+  | { type: "partial"; markdown: string; phase: string; complete: boolean }
+  | { type: "done"; markdown: string; durationMs: number; cached: boolean }
+  | { type: "error"; message: string };
+
+/**
+ * Streaming pipeline: yields NDJSON events as analysis progresses.
+ * The client always has something to display — partial results are sent
+ * after each Gemini call completes.
+ */
+export async function* analyzeRepoStream(
+  url: string,
+  options: Omit<AnalysisOptions, "onProgress"> = {}
+): AsyncGenerator<StreamEvent> {
+  const start = Date.now();
+  const { githubToken, geminiApiKey, noCache } = options;
+
+  // Step 1: Parse URL
+  yield { type: "progress", step: "Parsing repository URL…" };
+  const { owner, repo } = parseGitHubUrl(url);
+  const cacheKey = `${owner}/${repo}`;
+
+  // Check cache
+  if (!noCache) {
+    const cached = analysisCache.get(cacheKey) as AnalysisResult | null;
+    if (cached) {
+      yield { type: "meta", repoInfo: cached.repoInfo, filesAnalyzed: cached.filesAnalyzed, chunks: cached.chunks };
+      yield { type: "done", markdown: cached.markdown, durationMs: Date.now() - start, cached: true };
+      return;
+    }
+  }
+
+  // Step 2: Fetch repo metadata
+  yield { type: "progress", step: `Fetching metadata for ${owner}/${repo}…` };
+  const repoInfo = await fetchRepoInfo(owner, repo, githubToken);
+
+  // Step 3: Fetch file tree
+  yield { type: "progress", step: "Fetching file tree…" };
+  const tree = await fetchRepoTree(owner, repo, repoInfo.defaultBranch, githubToken);
+
+  // Step 4: Fetch files
+  const readable = selectReadableFiles(tree);
+  yield { type: "progress", step: `Reading ${readable.length} source files…` };
+  const files: FileContent[] = await fetchSelectedFiles(owner, repo, readable, githubToken);
+
+  // Step 5: Chunk
+  yield { type: "progress", step: "Chunking code by module…" };
+  const chunks: CodeChunk[] = chunkByModule(files);
+
+  // Send metadata so client can show repo info immediately
+  yield { type: "meta", repoInfo, filesAnalyzed: files.length, chunks: chunks.length };
+
+  // Step 6: Stream Gemini analysis — yields partial markdown after each call
+  let lastMarkdown = "";
+  for await (const event of analyzeWithGeminiStream(
+    { repoInfo, tree, files, chunks },
+    geminiApiKey
+  )) {
+    if (event.type === "progress") {
+      yield { type: "progress", step: event.step };
+    } else if (event.type === "partial") {
+      lastMarkdown = event.markdown;
+      yield { type: "partial", markdown: event.markdown, phase: event.phase, complete: event.complete };
+    }
+  }
+
+  // Cache result
+  const result: AnalysisResult = {
+    repoInfo,
+    tree,
+    filesAnalyzed: files.length,
+    chunks: chunks.length,
+    markdown: lastMarkdown,
+    durationMs: Date.now() - start,
+    cached: false,
+  };
+  analysisCache.set(cacheKey, result);
+
+  yield { type: "done", markdown: lastMarkdown, durationMs: Date.now() - start, cached: false };
 }
