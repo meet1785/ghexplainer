@@ -27,9 +27,9 @@ export interface FileContent {
 }
 
 // Max characters per file to avoid blowing up the prompt
-const MAX_FILE_CHARS = 8000;
+const MAX_FILE_CHARS = 4000;
 // Max total chars across all files sent to the model
-const MAX_TOTAL_CHARS = 120000;
+const MAX_TOTAL_CHARS = 60000;
 // File extensions considered "source code" worth reading
 const READABLE_EXTENSIONS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
@@ -48,11 +48,18 @@ const SKIP_PREFIXES = [
   "node_modules/", ".git/", ".next/", "dist/", "build/", "coverage/",
   ".turbo/", "out/", "__pycache__/", ".venv/", "venv/",
   ".cache/", ".parcel-cache/",
+  "vendor/", "third_party/", ".github/",
+  "test/", "tests/", "__tests__/", "spec/", "e2e/",
+  "fixtures/", "testdata/", "mock/", "mocks/",
+  "docs/", "examples/", "demo/", "samples/",
+  "static/", "public/assets/", "assets/images/",
 ];
 
 const SKIP_EXACT = new Set([
   "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-  "bun.lockb", ".DS_Store",
+  "bun.lockb", ".DS_Store", ".gitignore", ".eslintrc.json",
+  ".prettierrc", ".editorconfig", "LICENSE", "LICENSE.md",
+  "CHANGELOG.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md",
 ]);
 
 /**
@@ -159,6 +166,7 @@ export async function fetchFileContent(
 
 /**
  * Select which files from the tree are worth reading.
+ * Aggressively filters out test/generated/config files to save tokens.
  */
 export function selectReadableFiles(tree: TreeFile[]): TreeFile[] {
   return tree.filter((f) => {
@@ -167,6 +175,12 @@ export function selectReadableFiles(tree: TreeFile[]): TreeFile[] {
     if (SKIP_PREFIXES.some((prefix) => f.path.startsWith(prefix))) return false;
     const filename = f.path.split("/").pop() ?? "";
     if (SKIP_EXACT.has(filename)) return false;
+    // Skip test files by name pattern
+    if (/\.(test|spec|e2e|bench)\.(ts|tsx|js|jsx|py|go|rs|java)$/.test(filename)) return false;
+    if (/^test_/.test(filename) || /_test\.(go|py)$/.test(filename)) return false;
+    // Skip generated/minified files
+    if (/\.min\.(js|css)$/.test(filename)) return false;
+    if (/\.generated\.|\.pb\.|_pb2\.py$/.test(filename)) return false;
     if (READABLE_EXTENSIONS.has(filename)) return true; // Dockerfile, Makefile, etc.
     const ext = "." + filename.split(".").pop();
     return READABLE_EXTENSIONS.has(ext);
@@ -175,6 +189,7 @@ export function selectReadableFiles(tree: TreeFile[]): TreeFile[] {
 
 /**
  * Fetch contents for a list of files, respecting the total char budget.
+ * Fetches in parallel batches of 10 for speed.
  */
 export async function fetchSelectedFiles(
   owner: string,
@@ -184,6 +199,7 @@ export async function fetchSelectedFiles(
 ): Promise<FileContent[]> {
   const results: FileContent[] = [];
   let totalChars = 0;
+  const BATCH_SIZE = 10;
 
   // Prioritize important files first
   const sorted = [...files].sort((a, b) => {
@@ -197,12 +213,21 @@ export async function fetchSelectedFiles(
     return priority(a.path) - priority(b.path);
   });
 
-  for (const file of sorted) {
+  for (let i = 0; i < sorted.length; i += BATCH_SIZE) {
     if (totalChars >= MAX_TOTAL_CHARS) break;
-    const content = await fetchFileContent(owner, repo, file.path, token);
-    if (content.trim()) {
-      results.push({ path: file.path, content });
-      totalChars += content.length;
+    const batch = sorted.slice(i, i + BATCH_SIZE);
+    const fetched = await Promise.all(
+      batch.map(async (file) => {
+        const content = await fetchFileContent(owner, repo, file.path, token);
+        return { path: file.path, content };
+      })
+    );
+    for (const { path, content } of fetched) {
+      if (totalChars >= MAX_TOTAL_CHARS) break;
+      if (content.trim()) {
+        results.push({ path, content });
+        totalChars += content.length;
+      }
     }
   }
 

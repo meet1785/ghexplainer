@@ -36,102 +36,66 @@ const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 3000;
 
 // Minimum delay between API calls to avoid bursting the per-minute limit
-// Free tier: ~10-30 RPM → space calls ~6s apart for safety
-const INTER_REQUEST_DELAY_MS = 6000;
+// flash-lite: 30 RPM → space calls ~2s apart
+const INTER_REQUEST_DELAY_MS = 2000;
 let lastRequestTime = 0;
+
+// Per-Gemini-call timeout (prevents one hung call from eating the whole budget)
+const PER_CALL_TIMEOUT_MS = 30_000;
 
 // ─── System Prompts for each analysis pass ───────────────────
 
-const CHUNK_ANALYSIS_PROMPT = `You are a senior software architect analyzing a single code module.
+const CHUNK_ANALYSIS_PROMPT = `You are a senior software architect. Analyze this code module concisely.
 
-Given the repository context and one module's source files, produce a concise analysis covering:
-- Module purpose and responsibility
-- Key classes/functions/exports
-- Internal data flow
-- External dependencies used
-- Non-obvious design decisions
-- Potential issues or smells
-
-Be precise. Reference specific file names and function names. Do NOT pad with generic explanations.`;
+Cover: purpose, key exports/functions, data flow, dependencies, design decisions, issues.
+Reference specific file/function names. No generic filler. Be brief but precise.`;
 
 // Cross-module reasoning is now integrated into FINAL_SYNTHESIS_PROMPT (saves 1 API call)
 
-const FINAL_SYNTHESIS_PROMPT = `You are a senior software architect and technical writer specializing in understanding unfamiliar codebases quickly and deeply.
+const FINAL_SYNTHESIS_PROMPT = `You are a senior software architect and technical writer.
 
-You have been given:
-1. Repository metadata
-2. Full file tree
-3. Per-module analyses
+Given repo metadata, file tree, and per-module analyses:
+1. Reason about cross-module interactions, data flow, dependency graph.
+2. Synthesize into structured technical documentation.
 
-Your task:
-- FIRST, perform cross-module reasoning: identify how modules interact, the main data flow, shared patterns, coupling, and the dependency graph.
-- THEN, synthesize everything into deep, structured, long-form technical documentation.
+Rules: Only claim what's supported by the analyses. Skip boilerplate. Be specific to THIS repo.
 
-CRITICAL RULES:
-- Do NOT guess or hallucinate. Only make claims supported by the provided analyses.
-- If something is unclear, state: "This cannot be confirmed from the repository."
-- Be exhaustive on main components. Skip trivial boilerplate.
-- Avoid textbook definitions. Explain THIS repo, not concepts in general.
-- Write for: software engineering candidates, interviewers, and new developers.
-
-OUTPUT FORMAT — Use exactly these sections:
+Output these sections (be thorough but concise):
 
 # 1. Repository Overview
-- What this project does
-- Who it is for
-- Real-world use case
-- One-paragraph mental model
+What it does, who it's for, mental model.
 
 # 2. High-Level Architecture
-- Architectural style
-- Major components and interactions
-- Data flow overview (request → processing → response)
-- External dependencies and services
+Architectural style, major components, data flow, external deps.
 
 # 3. Folder & Module Breakdown
-For each major folder: purpose, key files, responsibility, why it exists.
+Purpose and key files per major folder.
 
 # 4. Core Functional Flow
-- Main execution path
-- Entry points
-- How the system starts and operates
-- Step-by-step flow for a typical use case
+Entry points, main execution path, step-by-step typical flow.
 
 # 5. APIs & Interfaces
-For each API/interface: name, inputs, outputs, internal flow, error handling.
+Key APIs: name, inputs, outputs, error handling.
 
 # 6. Key Business Logic
-- Where the "real logic" lives
-- Important algorithms or rules
-- Non-obvious design decisions and why they likely exist
+Where real logic lives, important algorithms, non-obvious decisions.
 
 # 7. Configuration & Environment
-- Environment variables
-- Config files
-- Build/runtime dependencies
-- How behavior changes per environment
+Env vars, config files, build deps.
 
 # 8. Testing Strategy
-- Types of tests (if present)
-- Coverage and gaps
-- How tests reflect system design
-- If no tests: state that explicitly
+Test types present (or absence thereof), coverage gaps.
 
 # 9. Strengths, Weaknesses & Trade-offs
-- What the repo does well
-- Design limitations
-- Scalability/maintainability concerns
-- What you would improve as a senior engineer
+What's done well, limitations, what to improve.
 
 # 10. Interview & Evaluation Notes
-- What an interviewer might ask about this repo
-- What a candidate should explain confidently
-- Red flags or standout points
+Key questions, standout points, red flags.
 
 # 11. Quick Start Mental Map
-"If you remember only 10 things about this repo, remember these:" — bullet list.
+10 key things to remember — bullet list.
 
-Write with the clarity of a senior engineer explaining at a whiteboard. Technical, direct, no fluff.`;
+Technical, direct, no fluff.`;
 
 // Single-pass prompt (used for small repos that fit in one call)
 const SINGLE_PASS_PROMPT = FINAL_SYNTHESIS_PROMPT;
@@ -179,135 +143,148 @@ function getRetryDelay(errorMsg: string, attempt: number): number {
 }
 
 /**
- * Call Gemini with automatic model fallback and rate-limit retry.
+ * Call Gemini with automatic model fallback, multi-key rotation, and per-call timeout.
  *
+ * @param apiKeys - one or more API keys (tries next key on 429)
  * @param modelPreference - which model tier to prefer: "primary" (quality), "fast" (RPM)
  */
 async function callGemini(
-  apiKey: string,
+  apiKeys: string | string[],
   systemPrompt: string,
   userPrompt: string,
-  maxTokens = 16384,
+  maxTokens = 8192,
   modelPreference: "primary" | "fast" = "primary"
 ): Promise<string> {
-  const genAI = new GoogleGenerativeAI(apiKey);
+  const keys = Array.isArray(apiKeys) ? apiKeys : [apiKeys];
 
   // Build ordered fallback chain based on preference
   const modelChain = modelPreference === "fast"
     ? [MODELS.fast, MODELS.primary, MODELS.fallback]
     : [MODELS.primary, MODELS.fast, MODELS.fallback];
 
-  for (const modelName of modelChain) {
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        await rateLimitDelay();
+  for (const key of keys) {
+    const genAI = new GoogleGenerativeAI(key);
 
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          systemInstruction: systemPrompt,
-        });
+    for (const modelName of modelChain) {
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          await rateLimitDelay();
 
-        // Clamp maxTokens to model capability
-        const effectiveMax = modelName.startsWith("gemini-2.5") ? maxTokens : Math.min(maxTokens, 8192);
+          const model = genAI.getGenerativeModel({
+            model: modelName,
+            systemInstruction: systemPrompt,
+          });
 
-        const result = await model.generateContent({
-          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: effectiveMax,
-          },
-        });
+          // Clamp maxTokens to model capability
+          const effectiveMax = modelName.startsWith("gemini-2.5") ? maxTokens : Math.min(maxTokens, 8192);
 
-        const text = result.response.text();
-        if (!text) throw new Error("Gemini returned an empty response.");
-        return text;
-      } catch (err) {
-        const msg = (err as Error).message ?? "";
-        const isRateLimit = msg.includes("429") || msg.includes("quota") || msg.includes("RESOURCE_EXHAUSTED");
-        const isServerError = msg.includes("500") || msg.includes("503");
-        const isRetryable = isRateLimit || isServerError;
-        const isLastAttempt = attempt === MAX_RETRIES;
+          // Per-call timeout to prevent one hung request from eating the entire budget
+          const callPromise = model.generateContent({
+            contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+            generationConfig: {
+              temperature: 0.3,
+              maxOutputTokens: effectiveMax,
+            },
+          });
 
-        if (isRetryable && !isLastAttempt) {
-          const delay = getRetryDelay(msg, attempt);
-          console.log(`[Gemini] ${modelName} attempt ${attempt + 1} failed (${isRateLimit ? '429' : '5xx'}), retrying in ${(delay/1000).toFixed(1)}s...`);
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Gemini call timed out")), PER_CALL_TIMEOUT_MS)
+          );
+
+          const result = await Promise.race([callPromise, timeoutPromise]);
+
+          const text = result.response.text();
+          if (!text) throw new Error("Gemini returned an empty response.");
+          return text;
+        } catch (err) {
+          const msg = (err as Error).message ?? "";
+          const isRateLimit = msg.includes("429") || msg.includes("quota") || msg.includes("RESOURCE_EXHAUSTED");
+          const isTimeout = msg.includes("timed out");
+          const isServerError = msg.includes("500") || msg.includes("503");
+          const isRetryable = isRateLimit || isServerError || isTimeout;
+          const isLastAttempt = attempt === MAX_RETRIES;
+
+          if (isRetryable && !isLastAttempt) {
+            const delay = isTimeout ? 1000 : getRetryDelay(msg, attempt);
+            console.log(`[Gemini] ${modelName} attempt ${attempt + 1} failed (${isRateLimit ? '429' : isTimeout ? 'timeout' : '5xx'}), retrying in ${(delay/1000).toFixed(1)}s...`);
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
+
+          if (isRateLimit) {
+            // Exhausted retries for this model on this key — try next model, then next key
+            console.log(`[Gemini] ${modelName} key ${keys.indexOf(key) + 1}/${keys.length} exhausted, trying next...`);
+            break;
+          }
+
+          if (isRetryable) {
+            console.log(`[Gemini] ${modelName} exhausted ${MAX_RETRIES + 1} attempts, trying next model...`);
+            break;
+          }
+
+          // Non-retryable error (bad request, auth, etc.)
+          throw err;
         }
-
-        if (isRetryable) {
-          // Exhausted retries for this model — try next in chain
-          console.log(`[Gemini] ${modelName} exhausted ${MAX_RETRIES + 1} attempts, trying next model...`);
-          break;
-        }
-
-        // Non-retryable error (bad request, auth, etc.)
-        throw err;
       }
     }
   }
 
   throw new Error(
-    "All Gemini models exhausted after retries. The free-tier quota may be fully used. " +
-    "Please wait a few minutes or upgrade to a paid plan."
+    "All Gemini models and API keys exhausted after retries. " +
+    "Please wait a few minutes or add more API keys (GEMINI_API_KEY_2, GEMINI_API_KEY_3)."
   );
 }
 
 // ─── Build prompts ───────────────────────────────────────────
 
-function buildRepoContext(input: GeminiAnalysisInput): string {
+/**
+ * Collect all available Gemini API keys from env.
+ * Supports: GEMINI_API_KEY, GEMINI_API_KEY_2, GEMINI_API_KEY_3, ...
+ */
+function collectApiKeys(explicit?: string): string[] {
+  const keys: string[] = [];
+  if (explicit) keys.push(explicit);
+  const primary = process.env.GEMINI_API_KEY;
+  if (primary && !keys.includes(primary)) keys.push(primary);
+  // Check numbered keys
+  for (let i = 2; i <= 5; i++) {
+    const k = process.env[`GEMINI_API_KEY_${i}`];
+    if (k && !keys.includes(k)) keys.push(k);
+  }
+  return keys;
+}
+
+/**
+ * Build compact repo context. Full tree only for synthesis; chunk prompts get slim version.
+ */
+function buildRepoContext(input: GeminiAnalysisInput, includeTree = true): string {
   const { repoInfo, tree } = input;
-  const treeText = tree
-    .map((f) => `${f.type === "tree" ? "📁" : "📄"} ${f.path}`)
-    .join("\n");
-
-  return `## Repository: ${repoInfo.owner}/${repoInfo.repo}
-**Description:** ${repoInfo.description || "(none)"}
-**Primary Language:** ${repoInfo.language || "unknown"}
-**Stars:** ${repoInfo.stars}
-**Topics:** ${repoInfo.topics.join(", ") || "(none)"}
-**Created:** ${repoInfo.createdAt}
-**Last Updated:** ${repoInfo.updatedAt}
-**Default Branch:** ${repoInfo.defaultBranch}
-
-## Full File Tree (${tree.length} entries)
-\`\`\`
-${treeText}
-\`\`\``;
+  let ctx = `## ${repoInfo.owner}/${repoInfo.repo}
+${repoInfo.description || "(none)"} | ${repoInfo.language || "?"} | ⭐${repoInfo.stars}`;
+  if (includeTree && tree.length > 0) {
+    // Compact tree: files only (no folders), max 150 entries
+    const fileList = tree.filter(f => f.type === "blob").slice(0, 150).map(f => f.path).join("\n");
+    ctx += `\n\nFile tree (${tree.filter(f => f.type === "blob").length} files):\n\`\`\`\n${fileList}\n\`\`\``;
+  }
+  return ctx;
 }
 
 function buildChunkPrompt(repoContext: string, chunk: CodeChunk): string {
+  // Compact file output — no heavy separators, saves tokens
   const filesText = chunk.files
-    .map((f) => `\n${"=".repeat(50)}\nFILE: ${f.path}\n${"=".repeat(50)}\n${f.content}`)
+    .map((f) => `--- ${f.path} ---\n${f.content}`)
     .join("\n");
 
-  return `${repoContext}
-
----
-
-## Module: ${chunk.module}
-Files: ${chunk.files.length} | Chars: ${chunk.totalChars.toLocaleString()}
-Dependencies: ${chunk.dependencies.join(", ") || "(none)"}
-
-${filesText}
-
----
-Analyze this module thoroughly.`;
+  return `${repoContext}\n\nModule: ${chunk.module} (${chunk.files.length} files, ${chunk.totalChars.toLocaleString()} chars)\nDeps: ${chunk.dependencies.join(", ") || "none"}\n\n${filesText}\n\nAnalyze this module.`;
 }
 
 function buildSinglePassPrompt(input: GeminiAnalysisInput): string {
-  const repoContext = buildRepoContext(input);
+  const repoContext = buildRepoContext(input, true);
   const filesText = input.files
-    .map((f) => `\n${"=".repeat(50)}\nFILE: ${f.path}\n${"=".repeat(50)}\n${f.content}`)
+    .map((f) => `--- ${f.path} ---\n${f.content}`)
     .join("\n");
 
-  return `${repoContext}
-
----
-
-## File Contents (${input.files.length} files)
-
-${filesText}
+  return `${repoContext}\n\n## Source (${input.files.length} files)\n\n${filesText}
 
 ---
 Produce the full structured technical documentation.`;
@@ -353,8 +330,8 @@ export async function analyzeWithGemini(
   apiKey?: string,
   onProgress?: (p: AnalysisProgress) => void
 ): Promise<string> {
-  const key = apiKey ?? process.env.GEMINI_API_KEY;
-  if (!key) {
+  const keys = collectApiKeys(apiKey);
+  if (keys.length === 0) {
     throw new Error("GEMINI_API_KEY is not set. Please add it to your .env.local file.");
   }
 
@@ -363,13 +340,14 @@ export async function analyzeWithGemini(
   // ── Small repo: single pass ──
   if (!chunks || chunks.length <= 1) {
     onProgress?.({ phase: "single-pass" });
-    return callGemini(key, SINGLE_PASS_PROMPT, buildSinglePassPrompt(input));
+    return callGemini(keys, SINGLE_PASS_PROMPT, buildSinglePassPrompt(input));
   }
 
   // ── Large repo: multi-pass (optimized: N+1 calls) ──
-  const repoContext = buildRepoContext(input);
+  // Chunk prompts get slim context (no tree) → saves ~2k tokens/call
+  const slimContext = buildRepoContext(input, false);
 
-  // Pass 1: Chunk Analysis (N calls, fast model)
+  // Pass 1: Chunk Analysis (N calls, fast model, 2048 tokens max)
   const chunkAnalyses: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -380,35 +358,22 @@ export async function analyzeWithGemini(
       module: chunk.module,
     });
     const analysis = await callGemini(
-      key,
+      keys,
       CHUNK_ANALYSIS_PROMPT,
-      buildChunkPrompt(repoContext, chunk),
-      4096,
-      "fast"  // Use high-RPM model for per-chunk analysis
+      buildChunkPrompt(slimContext, chunk),
+      2048,
+      "fast"
     );
     chunkAnalyses.push(`### Module: ${chunk.module}\n\n${analysis}`);
   }
 
-  // Pass 2: Combined cross-module reasoning + final synthesis (1 call, primary model)
-  // This saves 1 API call vs the old 3-pass approach
+  // Pass 2: Combined cross-module reasoning + synthesis (1 call, primary, 10k tokens)
   onProgress?.({ phase: "synthesis" });
+  const fullContext = buildRepoContext(input, true);
   const chunkSummary = describeChunks(chunks);
-  const synthesisPrompt = `${repoContext}
+  const synthesisPrompt = `${fullContext}\n\n${chunkSummary}\n\n## Per-Module Analyses\n\n${chunkAnalyses.join("\n\n---\n\n")}\n\nSynthesize into the final structured documentation.`;
 
----
-
-${chunkSummary}
-
----
-
-## Per-Module Analyses
-
-${chunkAnalyses.join("\n\n---\n\n")}
-
----
-First perform cross-module reasoning (how modules interact, main data flow, dependency graph), then synthesize everything into the final structured documentation following the output format exactly.`;
-
-  return callGemini(key, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 16384, "primary");
+  return callGemini(keys, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 10240, "primary");
 }
 
 // ─── Streaming analysis (yields partial results) ─────────────
@@ -426,8 +391,8 @@ export async function* analyzeWithGeminiStream(
   input: GeminiAnalysisInput,
   apiKey?: string
 ): AsyncGenerator<GeminiStreamEvent> {
-  const key = apiKey ?? process.env.GEMINI_API_KEY;
-  if (!key) {
+  const keys = collectApiKeys(apiKey);
+  if (keys.length === 0) {
     throw new Error("GEMINI_API_KEY is not set. Please add it to your .env.local file.");
   }
 
@@ -436,15 +401,14 @@ export async function* analyzeWithGeminiStream(
   // ── Small repo: single pass ──
   if (!chunks || chunks.length <= 1) {
     yield { type: "progress", step: "Generating documentation (single-pass)…" };
-    const markdown = await callGemini(key, SINGLE_PASS_PROMPT, buildSinglePassPrompt(input));
+    const markdown = await callGemini(keys, SINGLE_PASS_PROMPT, buildSinglePassPrompt(input));
     yield { type: "partial", markdown, phase: "complete", complete: true };
     return;
   }
 
-  // ── Large repo: multi-pass with partial yields (optimized: N+1 calls) ──
-  const repoContext = buildRepoContext(input);
+  // ── Large repo: multi-pass with partial yields (N+1 calls) ──
+  const slimContext = buildRepoContext(input, false);
 
-  // Extract repo info for formatChunkAnalyses
   const repoInfo = {
     owner: input.repoInfo.owner,
     repo: input.repoInfo.repo,
@@ -463,15 +427,14 @@ export async function* analyzeWithGeminiStream(
     };
 
     const analysis = await callGemini(
-      key,
+      keys,
       CHUNK_ANALYSIS_PROMPT,
-      buildChunkPrompt(repoContext, chunk),
-      4096,
+      buildChunkPrompt(slimContext, chunk),
+      2048,
       "fast"
     );
     chunkAnalyses.push(`### Module: ${chunk.module}\n\n${analysis}`);
 
-    // Yield professional partial markdown using backend formatter (no API call)
     yield {
       type: "partial",
       markdown: formatChunkAnalyses(repoInfo, chunkAnalyses, chunks.length, i + 1, false),
@@ -480,29 +443,16 @@ export async function* analyzeWithGeminiStream(
     };
   }
 
-  // Pass 2: Combined cross-module reasoning + final synthesis (1 call, primary model)
+  // Pass 2: Synthesis (1 call, primary model)
   yield { type: "progress", step: "Synthesizing final documentation…" };
+  const fullContext = buildRepoContext(input, true);
   const chunkSummary = describeChunks(chunks);
-  const synthesisPrompt = `${repoContext}
-
----
-
-${chunkSummary}
-
----
-
-## Per-Module Analyses
-
-${chunkAnalyses.join("\n\n---\n\n")}
-
----
-First perform cross-module reasoning (how modules interact, main data flow, dependency graph), then synthesize everything into the final structured documentation following the output format exactly.`;
+  const synthesisPrompt = `${fullContext}\n\n${chunkSummary}\n\n## Per-Module Analyses\n\n${chunkAnalyses.join("\n\n---\n\n")}\n\nSynthesize into the final structured documentation.`;
 
   let finalMarkdown: string;
   try {
-    finalMarkdown = await callGemini(key, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 16384, "primary");
+    finalMarkdown = await callGemini(keys, FINAL_SYNTHESIS_PROMPT, synthesisPrompt, 10240, "primary");
   } catch (err) {
-    // If synthesis fails (rate limit, timeout), fall back to backend-formatted output
     console.error("[ghexplainer] Synthesis call failed, using backend formatter:", err);
     finalMarkdown = formatChunkAnalyses(repoInfo, chunkAnalyses, chunks.length, chunks.length, true);
   }

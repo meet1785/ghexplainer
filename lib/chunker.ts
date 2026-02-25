@@ -21,9 +21,9 @@ export interface CodeChunk {
 }
 
 /** Token budget per chunk (chars ≈ tokens * 4) */
-const MAX_CHUNK_CHARS = 30000;
+const MAX_CHUNK_CHARS = 15000;
 /** Max number of chunks to send to the LLM */
-const MAX_CHUNKS = 8;
+const MAX_CHUNKS = 5;
 
 /**
  * Detect import/require targets from file content.
