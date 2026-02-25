@@ -5,6 +5,8 @@ import RepoForm from "@/components/RepoForm";
 import type { AnalysisMode } from "@/components/RepoForm";
 import LoadingState from "@/components/LoadingState";
 import AnalysisOutput from "@/components/AnalysisOutput";
+import HistoryPanel from "@/components/HistoryPanel";
+import { saveAnalysis, type SavedAnalysis } from "@/lib/history";
 import type { RepoInfo } from "@/lib/github";
 
 type AppState = "idle" | "loading" | "done" | "error";
@@ -71,6 +73,56 @@ export default function Home() {
   const [lastUrl, setLastUrl] = useState<string>("");
   const [lastMode, setLastMode] = useState<AnalysisMode>("stream");
 
+  /** Save completed analysis to localStorage history */
+  const saveToHistory = useCallback((data: AnalysisData, url: string) => {
+    try {
+      saveAnalysis({
+        url,
+        repoSlug: `${data.repoInfo.owner}/${data.repoInfo.repo}`,
+        description: data.repoInfo.description ?? "",
+        language: data.repoInfo.language,
+        stars: data.repoInfo.stars,
+        markdown: data.markdown,
+        complete: data.complete,
+        filesAnalyzed: data.filesAnalyzed,
+        chunks: data.chunks,
+        durationMs: data.durationMs,
+      });
+    } catch {
+      // Silently fail — history is a nice-to-have
+    }
+  }, []);
+
+  /** Load a previously saved analysis from history */
+  const handleLoadHistory = useCallback((entry: SavedAnalysis) => {
+    const data: AnalysisData = {
+      markdown: entry.markdown,
+      repoInfo: {
+        owner: entry.repoSlug.split("/")[0],
+        repo: entry.repoSlug.split("/")[1],
+        defaultBranch: "main",
+        description: entry.description,
+        stars: entry.stars,
+        language: entry.language,
+        topics: [],
+        createdAt: "",
+        updatedAt: "",
+      },
+      filesAnalyzed: entry.filesAnalyzed,
+      chunks: entry.chunks,
+      durationMs: entry.durationMs,
+      cached: true,
+      complete: entry.complete,
+      phase: "complete",
+    };
+    setResult(data);
+    setLastUrl(entry.url);
+    setState("done");
+    setTimeout(() => {
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }, []);
+
   /**
    * Complete mode: POST to /api/analyze, wait for full result.
    * More reliable for large repos — no streaming interruption risk.
@@ -124,8 +176,7 @@ export default function Home() {
       }
 
       const data = await res.json();
-      setState("done");
-      setResult({
+      const analysisData: AnalysisData = {
         markdown: data.markdown,
         repoInfo: data.repoInfo,
         filesAnalyzed: data.filesAnalyzed,
@@ -134,7 +185,10 @@ export default function Home() {
         cached: data.cached,
         complete: true,
         phase: "complete",
-      });
+      };
+      setState("done");
+      setResult(analysisData);
+      saveToHistory(analysisData, url);
       setTimeout(() => {
         resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
@@ -269,7 +323,7 @@ export default function Home() {
             case "done":
               clearTimeout(timeoutId);
               if (repoInfo) {
-                setResult({
+                const doneData: AnalysisData = {
                   markdown: event.markdown ?? partialMarkdown,
                   repoInfo,
                   filesAnalyzed,
@@ -278,7 +332,9 @@ export default function Home() {
                   cached: event.cached ?? false,
                   complete: true,
                   phase: "complete",
-                });
+                };
+                setResult(doneData);
+                saveToHistory(doneData, url);
               }
               setState("done");
               break;
@@ -301,7 +357,7 @@ export default function Home() {
 
       // If we have partial results, show them instead of an error
       if (partialMarkdown && repoInfo) {
-        setResult({
+        const partialData: AnalysisData = {
           markdown: partialMarkdown,
           repoInfo,
           filesAnalyzed,
@@ -310,7 +366,9 @@ export default function Home() {
           cached: false,
           complete: false,
           phase: "interrupted",
-        });
+        };
+        setResult(partialData);
+        saveToHistory(partialData, url);
         setState("done");
       } else {
         setErrorMsg(
@@ -427,6 +485,11 @@ export default function Home() {
       {/* ─── How It Works (only show on idle) ─── */}
       {state === "idle" && (
         <>
+          {/* ─── Previous Analyses ─── */}
+          <div className="max-w-5xl mx-auto px-6 pt-8">
+            <HistoryPanel onLoad={handleLoadHistory} />
+          </div>
+
           <section className="max-w-5xl mx-auto px-6 py-16">
             <h2 className="text-2xl font-bold text-center mb-2 text-white">How It Works</h2>
             <p className="text-gray-500 text-center text-sm mb-10">Three simple steps to deep code understanding</p>

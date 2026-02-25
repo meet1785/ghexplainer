@@ -32,16 +32,19 @@ const MODELS = {
   fallback:  "gemini-2.0-flash",       // Legacy fallback
 } as const;
 
-const MAX_RETRIES = 3;
-const BASE_RETRY_DELAY_MS = 3000;
+const MAX_RETRIES = 1; // Only 1 retry per model (2 attempts total) — avoid 429 snowball
+const BASE_RETRY_DELAY_MS = 4000;
 
-// Minimum delay between API calls to avoid bursting the per-minute limit
-// flash-lite: 30 RPM → space calls ~2s apart
-const INTER_REQUEST_DELAY_MS = 2000;
+// Minimum delay between API calls — 3.5s keeps us under 15 RPM even with 1 key
+const INTER_REQUEST_DELAY_MS = 3500;
 let lastRequestTime = 0;
 
 // Per-Gemini-call timeout (prevents one hung call from eating the whole budget)
 const PER_CALL_TIMEOUT_MS = 30_000;
+
+// Global request counter for observability and circuit-breaking
+let globalRequestCount = 0;
+const MAX_REQUESTS_PER_ANALYSIS = 15; // Hard cap: prevents runaway retry loops
 
 // ─── System Prompts for each analysis pass ───────────────────
 
@@ -143,10 +146,22 @@ function getRetryDelay(errorMsg: string, attempt: number): number {
 }
 
 /**
- * Call Gemini with automatic model fallback, multi-key rotation, and per-call timeout.
+ * Reset global request counter — call at start of each analysis run.
+ */
+export function resetRequestCounter() {
+  globalRequestCount = 0;
+}
+
+/**
+ * Call Gemini with smart retry logic:
  *
- * @param apiKeys - one or more API keys (tries next key on 429)
- * @param modelPreference - which model tier to prefer: "primary" (quality), "fast" (RPM)
+ * KEY INSIGHT: Rate limits (429) are per-KEY, not per-model.
+ * So if key1+model1 returns 429, key1+model2 will too.
+ * On 429 → skip the entire key immediately, try next key.
+ * On 5xx/timeout → retry same model once, then try next model.
+ *
+ * Worst case per call: keys × (models × 2 attempts) but 429 skips all models for that key.
+ * With 2 keys, 3 models: max 2 + 6 = 8 attempts (was 24 before).
  */
 async function callGemini(
   apiKeys: string | string[],
@@ -157,28 +172,46 @@ async function callGemini(
 ): Promise<string> {
   const keys = Array.isArray(apiKeys) ? apiKeys : [apiKeys];
 
-  // Build ordered fallback chain based on preference
+  // Circuit breaker: prevent runaway request loops
+  if (globalRequestCount >= MAX_REQUESTS_PER_ANALYSIS) {
+    throw new Error(
+      `Circuit breaker: ${globalRequestCount} API requests made in this analysis. ` +
+      "Stopping to avoid overloading the API. Please try again later."
+    );
+  }
+
+  // Build ordered model chain based on preference
   const modelChain = modelPreference === "fast"
-    ? [MODELS.fast, MODELS.primary, MODELS.fallback]
+    ? [MODELS.fast, MODELS.fallback]
     : [MODELS.primary, MODELS.fast, MODELS.fallback];
+
+  let lastError: Error | null = null;
 
   for (const key of keys) {
     const genAI = new GoogleGenerativeAI(key);
+    let keyRateLimited = false;
 
     for (const modelName of modelChain) {
+      // If this key already hit 429, skip ALL remaining models for this key
+      if (keyRateLimited) break;
+
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
+          // Circuit breaker check before each attempt
+          if (globalRequestCount >= MAX_REQUESTS_PER_ANALYSIS) {
+            throw new Error("Circuit breaker: too many API requests in this analysis.");
+          }
+
           await rateLimitDelay();
+          globalRequestCount++;
 
           const model = genAI.getGenerativeModel({
             model: modelName,
             systemInstruction: systemPrompt,
           });
 
-          // Clamp maxTokens to model capability
           const effectiveMax = modelName.startsWith("gemini-2.5") ? maxTokens : Math.min(maxTokens, 8192);
 
-          // Per-call timeout to prevent one hung request from eating the entire budget
           const callPromise = model.generateContent({
             contents: [{ role: "user", parts: [{ text: userPrompt }] }],
             generationConfig: {
@@ -192,33 +225,34 @@ async function callGemini(
           );
 
           const result = await Promise.race([callPromise, timeoutPromise]);
-
           const text = result.response.text();
           if (!text) throw new Error("Gemini returned an empty response.");
+          console.log(`[Gemini] ✓ ${modelName} (key ${keys.indexOf(key) + 1}) | total reqs: ${globalRequestCount}`);
           return text;
         } catch (err) {
+          lastError = err as Error;
           const msg = (err as Error).message ?? "";
           const isRateLimit = msg.includes("429") || msg.includes("quota") || msg.includes("RESOURCE_EXHAUSTED");
           const isTimeout = msg.includes("timed out");
           const isServerError = msg.includes("500") || msg.includes("503");
-          const isRetryable = isRateLimit || isServerError || isTimeout;
-          const isLastAttempt = attempt === MAX_RETRIES;
 
-          if (isRetryable && !isLastAttempt) {
-            const delay = isTimeout ? 1000 : getRetryDelay(msg, attempt);
-            console.log(`[Gemini] ${modelName} attempt ${attempt + 1} failed (${isRateLimit ? '429' : isTimeout ? 'timeout' : '5xx'}), retrying in ${(delay/1000).toFixed(1)}s...`);
+          if (isRateLimit) {
+            // 429 is per-KEY — skip ALL models for this key, move to next key
+            console.log(`[Gemini] 429 on key ${keys.indexOf(key) + 1}/${keys.length} (${modelName}), skipping to next key`);
+            keyRateLimited = true;
+            break;
+          }
+
+          if ((isTimeout || isServerError) && attempt < MAX_RETRIES) {
+            const delay = isTimeout ? 2000 : getRetryDelay(msg, attempt);
+            console.log(`[Gemini] ${modelName} ${isTimeout ? 'timeout' : '5xx'}, retry ${attempt + 1} in ${(delay/1000).toFixed(1)}s`);
             await new Promise((r) => setTimeout(r, delay));
             continue;
           }
 
-          if (isRateLimit) {
-            // Exhausted retries for this model on this key — try next model, then next key
-            console.log(`[Gemini] ${modelName} key ${keys.indexOf(key) + 1}/${keys.length} exhausted, trying next...`);
-            break;
-          }
-
-          if (isRetryable) {
-            console.log(`[Gemini] ${modelName} exhausted ${MAX_RETRIES + 1} attempts, trying next model...`);
+          // Exhausted retries for this model — try next model on same key
+          if (isTimeout || isServerError) {
+            console.log(`[Gemini] ${modelName} failed after ${attempt + 1} attempts, trying next model`);
             break;
           }
 
@@ -230,8 +264,8 @@ async function callGemini(
   }
 
   throw new Error(
-    "All Gemini models and API keys exhausted after retries. " +
-    "Please wait a few minutes or add more API keys (GEMINI_API_KEY_2, GEMINI_API_KEY_3)."
+    lastError?.message ??
+    "All Gemini models and API keys exhausted. Please wait a few minutes and try again."
   );
 }
 
@@ -335,6 +369,7 @@ export async function analyzeWithGemini(
     throw new Error("GEMINI_API_KEY is not set. Please add it to your .env.local file.");
   }
 
+  resetRequestCounter();
   const chunks = input.chunks;
 
   // ── Small repo: single pass ──
@@ -396,6 +431,7 @@ export async function* analyzeWithGeminiStream(
     throw new Error("GEMINI_API_KEY is not set. Please add it to your .env.local file.");
   }
 
+  resetRequestCounter();
   const chunks = input.chunks;
 
   // ── Small repo: single pass ──
