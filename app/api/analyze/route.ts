@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { analyzeRepo } from "@/lib/analyzer";
 import { parseGitHubUrl } from "@/lib/github";
 
-export const maxDuration = 180; // Vercel: allow up to 180s for AI response
+export const maxDuration = 300; // 5 minutes: 3 batches + inter-batch cooldowns + retries
 
 export async function POST(req: NextRequest) {
   let url: string;

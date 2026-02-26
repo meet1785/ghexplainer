@@ -51,12 +51,19 @@ function getModelDelay(modelName: string): number {
   return Math.ceil((60_000 / rpm) * 1.2);
 }
 
-const PER_CALL_TIMEOUT_MS = 90_000;
+const PER_CALL_TIMEOUT_MS = 120_000;
+
+/** Delay between batches to let rate limits cool off (ms) */
+const INTER_BATCH_DELAY_MS = 20_000;
 
 let globalRequestCount = 0;   // Successful API calls
 let globalAttemptCount = 0;   // All attempts (including 429s)
-const MAX_REQUESTS_PER_ANALYSIS = 10;  // Max successful calls
-const MAX_ATTEMPTS_PER_ANALYSIS = 25;  // Max total attempts (3 keys × 2 models × ~4 retries)
+const MAX_REQUESTS_PER_ANALYSIS = 12;  // Max successful calls
+const MAX_ATTEMPTS_PER_ANALYSIS = 45;  // Max total attempts (3 keys × 2 models × retries + waits)
+
+/** Track which key index + model last succeeded, so we try it first next batch */
+let lastSuccessfulKeyIdx = -1;
+let lastSuccessfulModel = ""
 
 // ─── Section Definitions ─────────────────────────────────────
 
@@ -101,12 +108,14 @@ Critical rules:
 - ONLY state what the code evidence supports. No speculation or generic filler.
 - Reference SPECIFIC files, functions, variable names from the source code.
 - If a section has no relevant info from the code, write "Not applicable for this codebase." under its header.
-- Each section: 150-400 words. Be DENSE — maximum insight per sentence.
+- Each section should be DETAILED and ELABORATIVE — aim for 500-1200 words per section depending on complexity.
+- Provide thorough explanations with code examples, file references, and technical depth.
+- Include code snippets, function signatures, and concrete examples where relevant.
 - You MUST complete ALL requested sections within your output.
 - Use the exact header format: # N. Section Title
 - Start immediately with the first section header. No preamble or introduction.
 
-Dense, technical, evidence-based. Every claim must reference actual code.`;
+Write with technical depth and thoroughness. Every claim must reference actual code. Be comprehensive — cover edge cases, design decisions, and implementation details.`;
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -153,6 +162,8 @@ function getRetryDelay(errorMsg: string, attempt: number): number {
 export function resetRequestCounter() {
   globalRequestCount = 0;
   globalAttemptCount = 0;
+  lastSuccessfulKeyIdx = -1;
+  lastSuccessfulModel = "";
 }
 
 // ─── Core Gemini API Call ────────────────────────────────────
@@ -178,12 +189,30 @@ async function callGemini(
     : [MODELS.primary, MODELS.fast];
   const uniqueModels = [...new Set(modelChain)];
 
-  let lastError: Error | null = null;
+  // Reorder keys so the last successful key is tried first
+  const orderedKeys = [...keys];
+  if (lastSuccessfulKeyIdx >= 0 && lastSuccessfulKeyIdx < keys.length) {
+    const [successKey] = orderedKeys.splice(lastSuccessfulKeyIdx, 1);
+    orderedKeys.unshift(successKey);
+  }
 
-  for (const key of keys) {
+  // Also reorder models if we have a last successful model
+  const orderedModels = [...uniqueModels];
+  if (lastSuccessfulModel && orderedModels.includes(lastSuccessfulModel as typeof orderedModels[number])) {
+    const idx = orderedModels.indexOf(lastSuccessfulModel as typeof orderedModels[number]);
+    if (idx > 0) {
+      const [m] = orderedModels.splice(idx, 1);
+      orderedModels.unshift(m);
+    }
+  }
+
+  let lastError: Error | null = null;
+  let all429 = true; // Track if all failures were 429s
+
+  for (const key of orderedKeys) {
     const genAI = new GoogleGenerativeAI(key);
 
-    for (const modelName of uniqueModels) {
+    for (const modelName of orderedModels) {
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -219,6 +248,9 @@ async function callGemini(
           const text = result.response.text();
           if (!text) throw new Error("Gemini returned an empty response.");
           globalRequestCount++;
+          lastSuccessfulKeyIdx = keys.indexOf(key);
+          lastSuccessfulModel = modelName;
+          all429 = false;
           console.log(`[Gemini] ✓ ${modelName} (key ${keys.indexOf(key) + 1}) | reqs: ${globalRequestCount}, attempts: ${globalAttemptCount}`);
           return text;
         } catch (err) {
@@ -233,6 +265,7 @@ async function callGemini(
             console.log(`[Gemini] 429 on key ${keys.indexOf(key) + 1}/${keys.length} (${modelName}), trying next model`);
             break; // break retry loop, try next model
           }
+          all429 = false;
 
           if ((isTimeout || isServerError) && attempt < MAX_RETRIES) {
             const delay = isTimeout ? 2000 : getRetryDelay(msg, attempt);
@@ -249,6 +282,50 @@ async function callGemini(
           throw err;
         }
       }
+    }
+  }
+
+  // If ALL failures were 429 rate limits, wait and retry once more
+  if (all429 && globalAttemptCount < MAX_ATTEMPTS_PER_ANALYSIS) {
+    const waitTime = 30_000; // 30s cooldown
+    console.log(`[Gemini] All keys/models hit 429. Waiting ${waitTime / 1000}s and retrying...`);
+    await new Promise(r => setTimeout(r, waitTime));
+
+    // Retry with the last successful key first, or key[0]
+    const retryKeyIdx = lastSuccessfulKeyIdx >= 0 ? lastSuccessfulKeyIdx : 0;
+    const retryKey = keys[retryKeyIdx];
+    const retryModel = orderedModels[0];
+    const genAI = new GoogleGenerativeAI(retryKey);
+
+    try {
+      await rateLimitDelay(retryModel);
+      globalAttemptCount++;
+
+      const model = genAI.getGenerativeModel({
+        model: retryModel,
+        systemInstruction: systemPrompt,
+      });
+
+      const result = await Promise.race([
+        model.generateContent({
+          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Gemini call timed out")), PER_CALL_TIMEOUT_MS)
+        ),
+      ]);
+
+      const text = result.response.text();
+      if (text) {
+        globalRequestCount++;
+        lastSuccessfulKeyIdx = retryKeyIdx;
+        lastSuccessfulModel = retryModel;
+        console.log(`[Gemini] ✓ ${retryModel} (key ${retryKeyIdx + 1}) after 429-cooldown | reqs: ${globalRequestCount}`);
+        return text;
+      }
+    } catch (retryErr) {
+      console.error(`[Gemini] Post-cooldown retry also failed:`, retryErr);
     }
   }
 
@@ -450,7 +527,13 @@ export async function analyzeWithGemini(
 
     console.log(`[Gemini] Batch ${batchIdx + 1}/${SECTION_BATCHES.length}: sections [${needed.join(", ")}] via ${modelPref}`);
 
-    const result = await callGemini(keys, BATCH_SYSTEM_PROMPT, prompt, 16384, modelPref);
+    // Inter-batch delay to let rate limits cool off
+    if (batchIdx > 0) {
+      console.log(`[Gemini] Inter-batch cooldown: ${INTER_BATCH_DELAY_MS / 1000}s`);
+      await new Promise(r => setTimeout(r, INTER_BATCH_DELAY_MS));
+    }
+
+    const result = await callGemini(keys, BATCH_SYSTEM_PROMPT, prompt, 40000, modelPref);
     batchOutputs.push(result);
 
     const newSections = parseSectionNumbers(result);
@@ -523,8 +606,15 @@ export async function* analyzeWithGeminiStream(
     const previousMarkdown = batchOutputs.length > 0 ? mergeSections(batchOutputs) : undefined;
     const prompt = buildBatchPrompt(input, needed, previousMarkdown);
 
+    // Inter-batch delay to let rate limits cool off
+    if (batchIdx > 0) {
+      console.log(`[Gemini] Inter-batch cooldown: ${INTER_BATCH_DELAY_MS / 1000}s`);
+      yield { type: "progress", step: `Cooling down before batch ${batchIdx + 1} (${INTER_BATCH_DELAY_MS / 1000}s)…` };
+      await new Promise(r => setTimeout(r, INTER_BATCH_DELAY_MS));
+    }
+
     try {
-      const result = await callGemini(keys, BATCH_SYSTEM_PROMPT, prompt, 16384, modelPref);
+      const result = await callGemini(keys, BATCH_SYSTEM_PROMPT, prompt, 40000, modelPref);
       batchOutputs.push(result);
     } catch (err) {
       console.error(`[Gemini] Batch ${batchIdx + 1} failed:`, err);
