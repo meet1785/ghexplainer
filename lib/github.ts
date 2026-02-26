@@ -62,6 +62,7 @@ const SKIP_EXACT = new Set([
   "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
   "bun.lockb", ".DS_Store", ".gitignore", ".eslintrc.json",
   ".prettierrc", ".editorconfig", "LICENSE", "LICENSE.md",
+  "seed-history.ts", "seed-history.js", "seed-data.ts", "seed-data.js",
   "CHANGELOG.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md",
   "README.md", "README.rst", "README.txt", "README",
   ".eslintrc", ".eslintrc.js", ".eslintrc.cjs", "eslint.config.mjs",
@@ -205,6 +206,9 @@ export function selectReadableFiles(tree: TreeFile[]): TreeFile[] {
     // Skip test files by name pattern
     if (/\.(test|spec|e2e|bench)\.(ts|tsx|js|jsx|py|go|rs|java)$/.test(filename)) return false;
     if (/^test_/.test(filename) || /_test\.(go|py)$/.test(filename)) return false;
+    // Skip seed/fixture/mock data files (contain hardcoded data that pollutes analysis)
+    if (/^seed[-_]/.test(filename)) return false;
+    if (/[-_](seed|fixture|mock[-_]?data|stub)s?\.(ts|tsx|js|jsx|json)$/i.test(filename)) return false;
     // Skip generated/minified files
     if (/\.min\.(js|css)$/.test(filename)) return false;
     if (/\.generated\.|.pb\.|_pb2\.py$/.test(filename)) return false;
@@ -262,8 +266,18 @@ export async function fetchSelectedFiles(
     for (const { path, content } of fetched) {
       if (totalChars >= MAX_TOTAL_CHARS) break;
       if (content.trim()) {
-        results.push({ path, content });
-        totalChars += content.length;
+        // Skip files that are mostly embedded string data (e.g., seed/fixture files
+        // with large template literals). These pollute LLM analysis context.
+        const backtickCount = (content.match(/`/g) || []).length;
+        const isDataHeavy = backtickCount > 50 && content.length > 3000;
+        if (isDataHeavy) {
+          // Include only the first 500 chars as a summary
+          results.push({ path, content: content.slice(0, 500) + "\n// ... (large data file truncated)" });
+          totalChars += 500;
+        } else {
+          results.push({ path, content });
+          totalChars += content.length;
+        }
       }
     }
   }

@@ -140,12 +140,14 @@ export default function Home() {
     setLastMode("complete");
 
     const STEP_MESSAGES = [
-      "Fetching repository metadata…",
-      "Downloading source files…",
-      "Analyzing code structure…",
-      "Running multi-pass AI analysis…",
-      "Synthesizing documentation…",
-      "Almost there — finalizing…",
+      "Parsing repository URL…",
+      "Fetching metadata from GitHub…",
+      "Walking file tree…",
+      "Reading source files…",
+      "Chunking code by module…",
+      "Analyzing modules with Gemini…",
+      "Cross-module reasoning…",
+      "Synthesizing final documentation…",
     ];
 
     let stepIdx = 0;
@@ -153,7 +155,7 @@ export default function Home() {
     const stepInterval = setInterval(() => {
       stepIdx = Math.min(stepIdx + 1, STEP_MESSAGES.length - 1);
       setCurrentStep(STEP_MESSAGES[stepIdx]);
-    }, 15_000);
+    }, 12_000);
 
     // 5 min client-side timeout
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
@@ -187,8 +189,8 @@ export default function Home() {
         complete: true,
         phase: "complete",
       };
-      setState("done");
       setResult(analysisData);
+      setState("done");
       saveToHistory(analysisData, url);
       setHistoryKey(k => k + 1);
       setTimeout(() => {
@@ -205,7 +207,7 @@ export default function Home() {
       );
       setState("error");
     }
-  }, []);
+  }, [saveToHistory]);
 
   /**
    * Parse an NDJSON stream line-by-line.
@@ -364,7 +366,7 @@ export default function Home() {
       clearTimeout(timeoutId);
 
       // If we never got a result from the stream, something went wrong
-      if (!hasShownResult && !result) {
+      if (!hasShownResult) {
         throw new Error("Stream ended without producing any output. Please try again.");
       }
     } catch (e) {
@@ -396,7 +398,7 @@ export default function Home() {
         setState("error");
       }
     }
-  }, [result]);
+  }, [saveToHistory]);
 
   const handleReset = () => {
     abortRef.current?.abort();

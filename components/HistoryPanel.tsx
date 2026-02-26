@@ -14,11 +14,9 @@ export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelPro
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    // Seed demo analyses on first visit, then load history
+    // Seed demo analyses on first visit, then load history (synchronous)
     seedHistoryIfEmpty();
-    // Small delay to allow async seed import to complete
-    const timer = setTimeout(() => setHistory(getHistory()), 100);
-    return () => clearTimeout(timer);
+    setHistory(getHistory());
   }, []);
 
   // Re-fetch history when refreshKey changes (e.g. after each batch save)

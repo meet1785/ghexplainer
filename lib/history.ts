@@ -3,6 +3,8 @@
  * Stores generated repo docs for future access.
  */
 
+import { SEED_ANALYSES } from "./seed-history";
+
 export interface SavedAnalysis {
   /** Unique ID */
   id: string;
@@ -109,6 +111,7 @@ export function clearHistory(): void {
 /**
  * Seed history with hardcoded demo analyses on first visit.
  * Only runs once — sets a flag in localStorage.
+ * Uses synchronous import for production reliability.
  */
 export function seedHistoryIfEmpty(): void {
   if (typeof window === "undefined") return;
@@ -122,18 +125,13 @@ export function seedHistoryIfEmpty(): void {
       return;
     }
 
-    // Dynamically import to avoid bundling seed data for users who already have history
-    import("./seed-history").then(({ SEED_ANALYSES }) => {
-      const seeded: SavedAnalysis[] = SEED_ANALYSES.map((entry, i) => ({
-        ...entry,
-        id: `${entry.repoSlug}-seed-${i}`,
-        savedAt: new Date(Date.now() - i * 86400000).toISOString(), // Stagger dates
-      }));
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-      localStorage.setItem(STORAGE_KEY + "_seed_loaded", "true");
-    }).catch(() => {
-      // Silently fail — seed is a nice-to-have
-    });
+    const seeded: SavedAnalysis[] = SEED_ANALYSES.map((entry, i) => ({
+      ...entry,
+      id: `${entry.repoSlug}-seed-${i}`,
+      savedAt: new Date(Date.now() - i * 86400000).toISOString(), // Stagger dates
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+    localStorage.setItem(STORAGE_KEY + "_seed_loaded", "true");
   } catch {
     // ignore
   }
