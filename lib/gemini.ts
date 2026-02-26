@@ -76,9 +76,9 @@ interface SectionDef {
 const SECTION_DEFS: SectionDef[] = [
   { id: 1, title: "Repository Overview", description: "What the project does, target users, core value proposition. Key technologies used." },
   { id: 2, title: "Architecture & Design", description: "Architectural style, component diagram in text, how major pieces connect. Name the backbone files." },
-  { id: 3, title: "Module Breakdown", description: "For EVERY significant module/directory: purpose, key files, exports, relations to other modules. Use a table or structured list." },
+  { id: 3, title: "Module Breakdown", description: "For EVERY significant module/directory: purpose, key files, exports, relations to other modules. Use bullet lists." },
   { id: 4, title: "Core Execution Flow", description: "Trace the main user-facing flow(s) end-to-end: entry point → routing → business logic → data → response. Name every function." },
-  { id: 5, title: "API Surface", description: "All public APIs/endpoints/CLI commands: method, path/name, inputs, outputs, error handling. Use a table." },
+  { id: 5, title: "API Surface", description: "All public APIs/endpoints/CLI commands: method, path/name, inputs, outputs, error handling. Use bullet lists — NO tables." },
   { id: 6, title: "Key Business Logic", description: "Most important algorithms, state machines, or decision trees. WHERE they live (file:function) and WHAT they do." },
   { id: 7, title: "Data Flow & State Management", description: "How data moves end-to-end. Caching, persistence, transformations, external services, state lifecycle." },
   { id: 8, title: "Configuration & Environment", description: "Required env vars, config files, build/deploy requirements. What breaks if misconfigured." },
@@ -87,15 +87,16 @@ const SECTION_DEFS: SectionDef[] = [
   { id: 11, title: "Quick Reference", description: "12-15 bullet points: the most important things to understand about this codebase. Include file paths." },
 ];
 
-/** Planned section batches — 3 API calls per analysis */
+/** Planned section batches — 3 primary API calls + 1 optional cleanup */
 const SECTION_BATCHES: number[][] = [
   [1, 2, 3, 4],   // Batch 1: Overview + Architecture + Modules + Flow
   [5, 6, 7, 8],   // Batch 2: API + Logic + Data + Config
-  [9, 10, 11],    // Batch 3: Stack + Quality + Reference (+ any missed)
+  [9, 10, 11],    // Batch 3: Stack + Quality + Reference
+  [],              // Batch 4: Cleanup — dynamically filled with missing/incomplete
 ];
 
 /** Model per batch — alternating to minimize rate limit waits */
-const BATCH_MODEL_STRATEGY: Array<"fast" | "primary"> = ["fast", "primary", "fast"];
+const BATCH_MODEL_STRATEGY: Array<"fast" | "primary"> = ["fast", "primary", "fast", "primary"];
 
 // ─── System Prompt ───────────────────────────────────────────
 
@@ -114,6 +115,7 @@ Critical rules:
 - You MUST complete ALL requested sections within your output.
 - Use the exact header format: # N. Section Title
 - Start immediately with the first section header. No preamble or introduction.
+- Use bullet lists and numbered lists for structured content. Do NOT use markdown tables.
 
 Write with technical depth and thoroughness. Every claim must reference actual code. Be comprehensive — cover edge cases, design decisions, and implementation details.`;
 
@@ -407,6 +409,8 @@ function buildBatchPrompt(
   }
 
   prompt += `## YOUR TASK: Generate ONLY these sections\n\n${requestedSections}\n\n`;
+  prompt += `IMPORTANT: You MUST generate ALL ${sectionIds.length} sections listed above. Do not skip any.\n`;
+  prompt += `If a section is not applicable, write "Not applicable for this codebase." under its header.\n`;
   prompt += `Start immediately with "# ${sectionIds[0]}." — no introductory text.`;
 
   return prompt;
@@ -446,6 +450,45 @@ function extractSection(markdown: string, sectionNum: number): string | null {
 }
 
 /**
+ * Check if a section appears truncated or incomplete.
+ * Returns true if the section looks valid and complete.
+ */
+function isSectionComplete(sectionText: string, sectionNum: number): boolean {
+  if (!sectionText) return false;
+
+  // Extract just the body (after the header line)
+  const lines = sectionText.split("\n");
+  const bodyLines = lines.slice(1).filter(l => l.trim().length > 0);
+  const bodyText = bodyLines.join("\n");
+  const wordCount = bodyText.split(/\s+/).filter(Boolean).length;
+
+  // Very short sections are likely truncated (unless it's a "Not applicable" section)
+  if (wordCount < 30 && !bodyText.toLowerCase().includes("not applicable")) {
+    console.log(`[Gemini] Section ${sectionNum} too short (${wordCount} words) — marking incomplete`);
+    return false;
+  }
+
+  // Check if section ends abruptly mid-sentence (ends with words but no punctuation)
+  const lastContentLine = bodyLines[bodyLines.length - 1]?.trim() ?? "";
+  if (lastContentLine.length > 20 &&
+      !lastContentLine.endsWith(".") &&
+      !lastContentLine.endsWith(":") &&
+      !lastContentLine.endsWith("`") &&
+      !lastContentLine.endsWith("|") &&
+      !lastContentLine.endsWith(">") &&
+      !lastContentLine.endsWith(")") &&
+      !lastContentLine.endsWith("-") &&
+      !lastContentLine.startsWith("*") &&
+      !lastContentLine.startsWith("-") &&
+      lastContentLine.match(/[a-zA-Z]$/)) {
+    console.log(`[Gemini] Section ${sectionNum} appears truncated (ends mid-sentence: "...${lastContentLine.slice(-40)}")`);
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Merge multiple batch outputs into a single ordered document.
  * Sections are deduplicated (first occurrence wins) and ordered 1-11.
  */
@@ -454,10 +497,19 @@ function mergeSections(batchOutputs: string[]): string {
 
   for (const output of batchOutputs) {
     for (let i = 1; i <= 11; i++) {
-      if (!sectionMap.has(i)) {
-        const section = extractSection(output, i);
-        if (section) sectionMap.set(i, section);
+      const section = extractSection(output, i);
+      if (!section) continue;
+
+      const existing = sectionMap.get(i);
+      if (!existing) {
+        // No previous version — take this one
+        sectionMap.set(i, section);
+      } else if (!isSectionComplete(existing, i) && isSectionComplete(section, i)) {
+        // Replace truncated version with a complete one
+        console.log(`[Gemini] Replacing truncated section ${i} with complete version`);
+        sectionMap.set(i, section);
       }
+      // Otherwise keep the first (complete) occurrence
     }
   }
 
@@ -490,20 +542,29 @@ export async function analyzeWithGemini(
 
   resetRequestCounter();
   const totalChars = input.files.reduce((s, f) => s + f.content.length, 0);
-  console.log(`[Gemini] Starting 3-batch analysis: ${input.files.length} files, ${(totalChars / 1000).toFixed(0)}K chars`);
+  console.log(`[Gemini] Starting analysis: ${input.files.length} files, ${(totalChars / 1000).toFixed(0)}K chars, up to ${SECTION_BATCHES.length} batches`);
 
   const batchOutputs: string[] = [];
   const completedSections = new Set<number>();
+  const sectionAttempts = new Map<number, number>(); // Track attempts per section
 
   for (let batchIdx = 0; batchIdx < SECTION_BATCHES.length; batchIdx++) {
     const planned = SECTION_BATCHES[batchIdx];
     const needed = planned.filter(s => !completedSections.has(s));
 
-    // On last batch, also request any missed sections from earlier batches
+    // On last batch (cleanup), add any missing/incomplete sections
     if (batchIdx === SECTION_BATCHES.length - 1) {
       for (let i = 1; i <= 11; i++) {
         if (!completedSections.has(i) && !needed.includes(i)) {
-          needed.push(i);
+          // Only re-request if attempted < 2 times
+          const attempts = sectionAttempts.get(i) ?? 0;
+          if (attempts < 2) {
+            needed.push(i);
+          } else {
+            // Accept whatever we have after 2 attempts
+            console.log(`[Gemini] Section ${i} attempted ${attempts} times — accepting as-is`);
+            completedSections.add(i);
+          }
         }
       }
     }
@@ -511,6 +572,11 @@ export async function analyzeWithGemini(
     if (needed.length === 0) {
       console.log(`[Gemini] Batch ${batchIdx + 1}: all sections already complete, skipping`);
       continue;
+    }
+
+    // Track attempt counts
+    for (const s of needed) {
+      sectionAttempts.set(s, (sectionAttempts.get(s) ?? 0) + 1);
     }
 
     onProgress?.({
@@ -537,8 +603,23 @@ export async function analyzeWithGemini(
     batchOutputs.push(result);
 
     const newSections = parseSectionNumbers(result);
-    newSections.forEach(s => completedSections.add(s));
-    console.log(`[Gemini] Batch ${batchIdx + 1} done: got [${[...newSections].join(", ")}], total: ${completedSections.size}/11`);
+    // Validate each section for completeness before marking done
+    for (const secNum of newSections) {
+      const secText = extractSection(result, secNum);
+      if (secText && isSectionComplete(secText, secNum)) {
+        completedSections.add(secNum);
+      } else {
+        // Accept after 2 attempts even if incomplete
+        const attempts = sectionAttempts.get(secNum) ?? 0;
+        if (attempts >= 2) {
+          console.log(`[Gemini] Section ${secNum} incomplete but attempted ${attempts} times — accepting`);
+          completedSections.add(secNum);
+        } else {
+          console.log(`[Gemini] Section ${secNum} found but incomplete — will re-request`);
+        }
+      }
+    }
+    console.log(`[Gemini] Batch ${batchIdx + 1} done: got [${[...newSections].join(", ")}], valid: ${completedSections.size}/11`);
 
     if (completedSections.size === 11) {
       console.log(`[Gemini] All 11 sections covered after batch ${batchIdx + 1}`);
@@ -576,7 +657,7 @@ export async function* analyzeWithGeminiStream(
 
   yield {
     type: "progress",
-    step: `Starting 3-batch analysis (${input.files.length} files, ${(totalChars / 1000).toFixed(0)}K chars)…`,
+    step: `Starting analysis (${input.files.length} files, ${(totalChars / 1000).toFixed(0)}K chars)…`,
   };
 
   const batchOutputs: string[] = [];
@@ -631,8 +712,17 @@ export async function* analyzeWithGeminiStream(
       throw err;
     }
 
-    const newSections = parseSectionNumbers(batchOutputs[batchOutputs.length - 1]);
-    newSections.forEach(s => completedSections.add(s));
+    const latestOutput = batchOutputs[batchOutputs.length - 1];
+    const newSections = parseSectionNumbers(latestOutput);
+    // Validate each section for completeness before marking done
+    for (const secNum of newSections) {
+      const secText = extractSection(latestOutput, secNum);
+      if (secText && isSectionComplete(secText, secNum)) {
+        completedSections.add(secNum);
+      } else {
+        console.log(`[Gemini] Section ${secNum} found but incomplete — will re-request`);
+      }
+    }
 
     const accumulatedMarkdown = mergeSections(batchOutputs);
     const isComplete = completedSections.size === 11 || batchIdx === SECTION_BATCHES.length - 1;
