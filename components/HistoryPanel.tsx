@@ -1,19 +1,32 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getHistory, deleteAnalysis, clearHistory, type SavedAnalysis } from "@/lib/history";
+import { getHistory, deleteAnalysis, clearHistory, seedHistoryIfEmpty, type SavedAnalysis } from "@/lib/history";
 
 interface HistoryPanelProps {
   onLoad: (entry: SavedAnalysis) => void;
+  /** Increment to trigger re-fetching history from localStorage */
+  refreshKey?: number;
 }
 
-export default function HistoryPanel({ onLoad }: HistoryPanelProps) {
+export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelProps) {
   const [history, setHistory] = useState<SavedAnalysis[]>([]);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    setHistory(getHistory());
+    // Seed demo analyses on first visit, then load history
+    seedHistoryIfEmpty();
+    // Small delay to allow async seed import to complete
+    const timer = setTimeout(() => setHistory(getHistory()), 100);
+    return () => clearTimeout(timer);
   }, []);
+
+  // Re-fetch history when refreshKey changes (e.g. after each batch save)
+  useEffect(() => {
+    if (refreshKey > 0) {
+      setHistory(getHistory());
+    }
+  }, [refreshKey]);
 
   if (history.length === 0) return null;
 

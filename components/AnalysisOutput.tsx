@@ -24,9 +24,9 @@ interface AnalysisOutputProps {
 /** User-friendly phase label */
 function phaseLabel(phase: string): string {
   if (!phase || phase === "complete") return "";
-  if (phase === "cross-module") return "Cross-module reasoning";
   if (phase === "interrupted") return "Connection interrupted";
-  if (phase.startsWith("chunk-")) return `Module analysis (${phase.replace("chunk-", "")})`;
+  if (phase === "partial-error") return "Partial results (some batches failed)";
+  if (phase.startsWith("batch-")) return `Section batch ${phase.replace("batch-", "")} of 3`;
   return phase;
 }
 

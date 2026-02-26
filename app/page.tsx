@@ -72,6 +72,7 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const [lastUrl, setLastUrl] = useState<string>("");
   const [lastMode, setLastMode] = useState<AnalysisMode>("stream");
+  const [historyKey, setHistoryKey] = useState(0);
 
   /** Save completed analysis to localStorage history */
   const saveToHistory = useCallback((data: AnalysisData, url: string) => {
@@ -189,6 +190,7 @@ export default function Home() {
       setState("done");
       setResult(analysisData);
       saveToHistory(analysisData, url);
+      setHistoryKey(k => k + 1);
       setTimeout(() => {
         resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
@@ -297,7 +299,7 @@ export default function Home() {
               if (repoInfo && !hasShownResult) {
                 hasShownResult = true;
                 setState("done");
-                setResult({
+                const partialData: AnalysisData = {
                   markdown: partialMarkdown,
                   repoInfo,
                   filesAnalyzed,
@@ -306,17 +308,30 @@ export default function Home() {
                   cached: false,
                   complete: event.complete ?? false,
                   phase: event.phase ?? "",
-                });
+                };
+                setResult(partialData);
+                // Save partial to history dynamically
+                saveToHistory(partialData, url);
+                setHistoryKey(k => k + 1);
                 setTimeout(() => {
                   resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                 }, 100);
               } else if (hasShownResult) {
                 // Update existing result with newer markdown
-                setResult((prev) =>
-                  prev
-                    ? { ...prev, markdown: partialMarkdown, complete: event.complete ?? false, phase: event.phase ?? "" }
-                    : prev
-                );
+                const updatedData: AnalysisData = {
+                  markdown: partialMarkdown,
+                  repoInfo: repoInfo!,
+                  filesAnalyzed,
+                  chunks,
+                  durationMs: 0,
+                  cached: false,
+                  complete: event.complete ?? false,
+                  phase: event.phase ?? "",
+                };
+                setResult(updatedData);
+                // Dynamically update history after each batch
+                saveToHistory(updatedData, url);
+                setHistoryKey(k => k + 1);
               }
               break;
 
@@ -335,6 +350,7 @@ export default function Home() {
                 };
                 setResult(doneData);
                 saveToHistory(doneData, url);
+                setHistoryKey(k => k + 1);
               }
               setState("done");
               break;
@@ -369,6 +385,7 @@ export default function Home() {
         };
         setResult(partialData);
         saveToHistory(partialData, url);
+        setHistoryKey(k => k + 1);
         setState("done");
       } else {
         setErrorMsg(
@@ -487,7 +504,7 @@ export default function Home() {
         <>
           {/* ─── Previous Analyses ─── */}
           <div className="max-w-5xl mx-auto px-6 pt-8">
-            <HistoryPanel onLoad={handleLoadHistory} />
+            <HistoryPanel onLoad={handleLoadHistory} refreshKey={historyKey} />
           </div>
 
           <section className="max-w-5xl mx-auto px-6 py-16">

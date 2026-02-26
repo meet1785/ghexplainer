@@ -20,10 +20,14 @@ export interface CodeChunk {
   dependencies: string[];
 }
 
-/** Token budget per chunk (chars ≈ tokens * 4) */
-const MAX_CHUNK_CHARS = 15000;
-/** Max number of chunks to send to the LLM */
-const MAX_CHUNKS = 5;
+/**
+ * Token budget per chunk — set large to minimize API calls.
+ * Gemini 2.5 handles 1M input tokens (~4M chars), so 100K per chunk is fine.
+ * With 200K total file budget, this typically yields 1-2 chunks.
+ */
+const MAX_CHUNK_CHARS = 100_000;
+/** Max chunks — we aim for 1 call (single-pass) or 2 calls max */
+const MAX_CHUNKS = 3;
 
 /**
  * Detect import/require targets from file content.

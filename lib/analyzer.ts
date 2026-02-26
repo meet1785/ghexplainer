@@ -105,19 +105,13 @@ export async function analyzeRepo(
     geminiApiKey,
     (progress) => {
       switch (progress.phase) {
-        case "chunk-analysis":
+        case "batch":
           notify(
-            `Analyzing module ${progress.current}/${progress.total}: ${progress.module}…`
+            `Generating batch ${progress.current}/${progress.total} — sections [${progress.sections?.join(", ") ?? ""}]…`
           );
           break;
-        case "cross-module":
-          notify("Cross-module reasoning…");
-          break;
-        case "synthesis":
-          notify("Synthesizing final documentation…");
-          break;
-        case "single-pass":
-          notify("Generating documentation (single-pass)…");
+        case "complete":
+          notify(`Documentation complete (${progress.completedSections?.length ?? 0}/11 sections)`);
           break;
       }
     }
