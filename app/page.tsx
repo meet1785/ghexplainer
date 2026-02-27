@@ -6,6 +6,8 @@ import type { AnalysisMode } from "@/components/RepoForm";
 import LoadingState from "@/components/LoadingState";
 import AnalysisOutput from "@/components/AnalysisOutput";
 import HistoryPanel from "@/components/HistoryPanel";
+import DemoShowcase from "@/components/DemoShowcase";
+import Logo from "@/components/Logo";
 import { saveAnalysis, type SavedAnalysis } from "@/lib/history";
 import type { RepoInfo } from "@/lib/github";
 
@@ -18,49 +20,23 @@ interface AnalysisData {
   chunks: number;
   durationMs: number;
   cached: boolean;
-  /** Whether the analysis completed fully or was cut short */
   complete: boolean;
-  /** Current phase label for streaming UI */
   phase: string;
 }
 
-const FEATURES = [
-  {
-    icon: "🏗️",
-    title: "Architecture Analysis",
-    description: "Identifies design patterns, component relationships, and system architecture from source code.",
-  },
-  {
-    icon: "🔄",
-    title: "Data Flow Tracing",
-    description: "Maps how data moves through the codebase — from input to storage to output.",
-  },
-  {
-    icon: "🧩",
-    title: "Smart Chunking",
-    description: "Splits large repos into logical modules with dependency analysis for thorough coverage.",
-  },
-  {
-    icon: "🤖",
-    title: "Multi-Pass AI",
-    description: "Analyzes each module, reasons across modules, then synthesizes a unified document.",
-  },
-  {
-    icon: "📥",
-    title: "Download as Markdown",
-    description: "Export the full analysis as a clean .md file — ready for your docs, notes, or portfolio.",
-  },
-  {
-    icon: "⚡",
-    title: "Caching Built-in",
-    description: "Repeated analyses are instant — results are cached in-memory for 1 hour.",
-  },
+const HOW_IT_WORKS = [
+  { step: "01", title: "Paste a GitHub URL", description: "Enter any public repository URL — no login or token needed." },
+  { step: "02", title: "AI Analyzes the Code", description: "We fetch the source files, chunk them by module, and run multi-pass analysis via Gemini." },
+  { step: "03", title: "Get Deep Documentation", description: "Receive a structured 11-section technical report covering architecture, logic, and more." },
 ];
 
-const HOW_IT_WORKS = [
-  { step: "1", title: "Paste a GitHub URL", description: "Enter any public repository URL — no login or token needed." },
-  { step: "2", title: "AI Analyzes the Code", description: "We fetch the source files, chunk them by module, and run multi-pass analysis via Gemini." },
-  { step: "3", title: "Get Deep Documentation", description: "Receive a structured 11-section technical report covering architecture, logic, and more." },
+const FEATURES = [
+  { icon: "◆", title: "Architecture Analysis", description: "Identifies design patterns, component relationships, and system architecture from source code." },
+  { icon: "◈", title: "Data Flow Tracing", description: "Maps how data moves through the codebase — from input to storage to output." },
+  { icon: "▣", title: "Smart Chunking", description: "Splits large repos into logical modules with dependency analysis for thorough coverage." },
+  { icon: "◎", title: "Multi-Pass AI", description: "Analyzes each module, reasons across modules, then synthesizes a unified document." },
+  { icon: "▿", title: "Export as Markdown", description: "Export the full analysis as a clean .md file — ready for your docs, notes, or portfolio." },
+  { icon: "⟐", title: "Caching Built-in", description: "Repeated analyses are instant — results are cached in-memory for 1 hour." },
 ];
 
 export default function Home() {
@@ -74,7 +50,8 @@ export default function Home() {
   const [lastMode, setLastMode] = useState<AnalysisMode>("stream");
   const [historyKey, setHistoryKey] = useState(0);
 
-  /** Save completed analysis to localStorage history */
+  /* ── Handlers (logic preserved from original) ── */
+
   const saveToHistory = useCallback((data: AnalysisData, url: string) => {
     try {
       saveAnalysis({
@@ -90,11 +67,10 @@ export default function Home() {
         durationMs: data.durationMs,
       });
     } catch {
-      // Silently fail — history is a nice-to-have
+      // Silently fail
     }
   }, []);
 
-  /** Load a previously saved analysis from history */
   const handleLoadHistory = useCallback((entry: SavedAnalysis) => {
     const data: AnalysisData = {
       markdown: entry.markdown,
@@ -124,10 +100,6 @@ export default function Home() {
     }, 100);
   }, []);
 
-  /**
-   * Complete mode: POST to /api/analyze, wait for full result.
-   * More reliable for large repos — no streaming interruption risk.
-   */
   const handleAnalyzeComplete = useCallback(async (url: string) => {
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -157,7 +129,6 @@ export default function Home() {
       setCurrentStep(STEP_MESSAGES[stepIdx]);
     }, 12_000);
 
-    // 5 min client-side timeout
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
     try {
@@ -209,12 +180,7 @@ export default function Home() {
     }
   }, [saveToHistory]);
 
-  /**
-   * Parse an NDJSON stream line-by-line.
-   * Uses fetch + getReader() (NOT EventSource) for maximum control.
-   */
   const handleAnalyze = useCallback(async (url: string) => {
-    // Abort any previous request
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -226,14 +192,12 @@ export default function Home() {
     setLastUrl(url);
     setLastMode("stream");
 
-    // Partial results accumulator
     let partialMarkdown = "";
     let repoInfo: RepoInfo | null = null;
     let filesAnalyzed = 0;
     let chunks = 0;
     let hasShownResult = false;
 
-    // Client-side timeout (5 min)
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
     try {
@@ -245,11 +209,7 @@ export default function Home() {
       if (!res.ok) {
         const text = await res.text();
         let msg: string;
-        try {
-          msg = JSON.parse(text).error;
-        } catch {
-          msg = `HTTP ${res.status}: ${text.slice(0, 200)}`;
-        }
+        try { msg = JSON.parse(text).error; } catch { msg = `HTTP ${res.status}: ${text.slice(0, 200)}`; }
         throw new Error(msg);
       }
 
@@ -265,39 +225,29 @@ export default function Home() {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Process complete lines
         const lines = buffer.split("\n");
-        buffer = lines.pop() ?? ""; // keep incomplete line in buffer
+        buffer = lines.pop() ?? "";
 
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
 
           let event;
-          try {
-            event = JSON.parse(trimmed);
-          } catch {
-            continue; // skip malformed lines
-          }
+          try { event = JSON.parse(trimmed); } catch { continue; }
 
           switch (event.type) {
             case "heartbeat":
-              // Keep-alive — no action needed
               break;
-
             case "progress":
               setCurrentStep(event.step ?? "");
               break;
-
             case "meta":
               repoInfo = event.repoInfo;
               filesAnalyzed = event.filesAnalyzed ?? 0;
               chunks = event.chunks ?? 0;
               break;
-
             case "partial":
               partialMarkdown = event.markdown ?? "";
-              // Show result immediately on first partial
               if (repoInfo && !hasShownResult) {
                 hasShownResult = true;
                 setState("done");
@@ -312,14 +262,12 @@ export default function Home() {
                   phase: event.phase ?? "",
                 };
                 setResult(partialData);
-                // Save partial to history dynamically
                 saveToHistory(partialData, url);
                 setHistoryKey(k => k + 1);
                 setTimeout(() => {
                   resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                 }, 100);
               } else if (hasShownResult) {
-                // Update existing result with newer markdown
                 const updatedData: AnalysisData = {
                   markdown: partialMarkdown,
                   repoInfo: repoInfo!,
@@ -331,12 +279,10 @@ export default function Home() {
                   phase: event.phase ?? "",
                 };
                 setResult(updatedData);
-                // Dynamically update history after each batch
                 saveToHistory(updatedData, url);
                 setHistoryKey(k => k + 1);
               }
               break;
-
             case "done":
               clearTimeout(timeoutId);
               if (repoInfo) {
@@ -356,7 +302,6 @@ export default function Home() {
               }
               setState("done");
               break;
-
             case "error":
               throw new Error(event.message ?? "Analysis failed");
           }
@@ -365,7 +310,6 @@ export default function Home() {
 
       clearTimeout(timeoutId);
 
-      // If we never got a result from the stream, something went wrong
       if (!hasShownResult) {
         throw new Error("Stream ended without producing any output. Please try again.");
       }
@@ -373,7 +317,6 @@ export default function Home() {
       clearTimeout(timeoutId);
       const msg = (e as Error).message ?? "Something went wrong.";
 
-      // If we have partial results, show them instead of an error
       if (partialMarkdown && repoInfo) {
         const partialData: AnalysisData = {
           markdown: partialMarkdown,
@@ -418,61 +361,71 @@ export default function Home() {
     }
   }, [lastUrl, lastMode, handleAnalyze, handleAnalyzeComplete]);
 
-  /** Dispatch to the right handler based on selected mode */
   const handleSubmit = useCallback((url: string, mode: AnalysisMode) => {
     if (mode === "complete") handleAnalyzeComplete(url);
     else handleAnalyze(url);
   }, [handleAnalyze, handleAnalyzeComplete]);
 
+  /* ── Render ── */
+
   return (
-    <main className="min-h-screen bg-[#030712] text-gray-100">
-      {/* ─── Hero Section ─── */}
+    <main className="min-h-screen relative">
+      {/* Fixed dot grid */}
+      <div className="fixed inset-0 bg-dots pointer-events-none" />
+
+      {/* ═══ Hero ═══ */}
       <section className="relative overflow-hidden">
-        {/* Background gradient orbs */}
+        {/* Ambient glow */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -top-40 -left-40 w-80 h-80 bg-indigo-600/20 rounded-full blur-[120px]" />
-          <div className="absolute -top-20 right-0 w-96 h-96 bg-purple-600/15 rounded-full blur-[120px]" />
-          <div className="absolute bottom-0 left-1/3 w-72 h-72 bg-blue-600/10 rounded-full blur-[100px]" />
+          <div className="absolute -top-48 -left-32 w-[600px] h-[600px] bg-gold/5 rounded-full blur-[200px] float-blob" />
+          <div className="absolute -top-24 -right-16 w-[500px] h-[500px] bg-jade/5 rounded-full blur-[180px] float-blob-alt" />
+          <div className="absolute bottom-0 left-1/4 w-[400px] h-[400px] bg-coral/5 rounded-full blur-[150px] float-blob" />
         </div>
 
-        <div className="relative max-w-5xl mx-auto px-6 pt-16 pb-12 flex flex-col items-center">
-          {/* Logo and badge */}
-          <div className="flex items-center gap-2 mb-3">
-            <span className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full">
+        <div className="relative max-w-5xl mx-auto px-6 pt-20 pb-14 flex flex-col items-center z-10">
+          {/* Badges */}
+          <div className="flex items-center gap-2.5 mb-5 reveal">
+            <span className="px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.15em] bg-jade/10 text-jade border border-jade/20 rounded-full font-mono">
               Open Source
             </span>
-            <span className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full">
+            <span className="px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.15em] bg-gold/10 text-gold border border-gold/20 rounded-full font-mono">
               Free to Use
             </span>
           </div>
 
-          {/* Title */}
-          <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-center mt-4 mb-5">
-            <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent animate-gradient">
+          {/* Logo + Title */}
+          <div className="mb-2 reveal reveal-d1 pulse-gold rounded-2xl">
+            <Logo size={56} />
+          </div>
+          <h1 className="text-6xl sm:text-8xl font-extrabold tracking-tight text-center mt-1 mb-6 reveal reveal-d2">
+            <span
+              className="bg-gradient-to-r from-gold via-coral to-jade bg-clip-text text-transparent animate-gradient"
+            >
               ghexplainer
             </span>
           </h1>
 
-          <p className="text-lg sm:text-xl text-gray-400 text-center max-w-2xl leading-relaxed mb-8">
+          {/* Tagline */}
+          <p className="font-body italic text-lg sm:text-xl text-dust text-center max-w-2xl leading-relaxed mb-10 reveal reveal-d3">
             AI-powered deep technical documentation for any public GitHub repository.
             Understand architecture, data flow, and key logic in minutes.
           </p>
 
-          {/* ─── Input Form ─── */}
+          {/* Form */}
           {(state === "idle" || state === "error") && (
-            <div className="w-full max-w-2xl">
+            <div className="w-full max-w-2xl reveal reveal-d4">
               <RepoForm onSubmit={handleSubmit} loading={false} />
             </div>
           )}
 
           {/* Error */}
           {state === "error" && (
-            <div className="w-full max-w-2xl mt-4 p-4 rounded-xl bg-red-950/50 border border-red-800/50 text-red-300 text-sm backdrop-blur-sm">
+            <div className="w-full max-w-2xl mt-4 p-4 rounded-xl bg-coral/10 border border-coral/30 backdrop-blur-sm">
               <div className="flex items-start gap-3">
-                <span className="text-red-400 text-lg shrink-0">⚠️</span>
+                <span className="text-coral text-lg shrink-0">⚠</span>
                 <div>
-                  <p className="font-medium text-red-200">Analysis failed</p>
-                  <p className="mt-1 text-red-300/80">{errorMsg}</p>
+                  <p className="font-semibold text-sm text-coral">Analysis failed</p>
+                  <p className="mt-1 text-sm text-coral/80 font-body">{errorMsg}</p>
                 </div>
               </div>
             </div>
@@ -483,9 +436,9 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── Result Section ─── */}
+      {/* ═══ Result ═══ */}
       {state === "done" && result && (
-        <div ref={resultRef}>
+        <div ref={resultRef} className="relative z-10">
           <AnalysisOutput
             markdown={result.markdown}
             repoInfo={result.repoInfo}
@@ -501,103 +454,125 @@ export default function Home() {
         </div>
       )}
 
-      {/* ─── How It Works (only show on idle) ─── */}
+      {/* ═══ Idle Sections ═══ */}
       {state === "idle" && (
-        <>
-          {/* ─── Previous Analyses ─── */}
-          <div className="max-w-5xl mx-auto px-6 pt-8">
+        <div className="relative z-10">
+          {/* Demo Showcase — the star of the show */}
+          <section className="py-20 border-t border-edge/30">
+            <DemoShowcase />
+          </section>
+
+          {/* User&apos;s Previous Analyses */}
+          <div className="max-w-5xl mx-auto px-6 py-8">
             <HistoryPanel onLoad={handleLoadHistory} refreshKey={historyKey} />
           </div>
 
-          <section className="max-w-5xl mx-auto px-6 py-16">
-            <h2 className="text-2xl font-bold text-center mb-2 text-white">How It Works</h2>
-            <p className="text-gray-500 text-center text-sm mb-10">Three simple steps to deep code understanding</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* How It Works */}
+          <section className="max-w-5xl mx-auto px-6 py-20 border-t border-edge/30">
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-gold/60 text-center mb-3">
+              Process
+            </p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-center mb-12 text-cream">
+              How It Works
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {HOW_IT_WORKS.map((item) => (
                 <div
                   key={item.step}
-                  className="relative p-6 rounded-2xl bg-gray-900/50 border border-gray-800/50 backdrop-blur-sm group hover:border-indigo-500/30 transition-all duration-300"
+                  className="relative p-6 rounded-2xl bg-surface/60 border border-edge/50 group hover:border-gold/30 transition-all duration-500"
                 >
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center text-sm font-bold">
+                  <div className="flex items-center gap-4 mb-4">
+                    <span className="font-mono text-4xl font-bold text-gold/15 group-hover:text-gold/30 transition-colors duration-500 select-none">
                       {item.step}
                     </span>
-                    <h3 className="font-semibold text-white">{item.title}</h3>
+                    <h3 className="font-semibold text-cream text-base">{item.title}</h3>
                   </div>
-                  <p className="text-gray-400 text-sm leading-relaxed">{item.description}</p>
+                  <p className="font-body text-dust text-[15px] leading-relaxed">{item.description}</p>
                 </div>
               ))}
             </div>
           </section>
 
-          {/* ─── Features Grid ─── */}
-          <section className="max-w-5xl mx-auto px-6 py-16">
-            <h2 className="text-2xl font-bold text-center mb-2 text-white">What You Get</h2>
-            <p className="text-gray-500 text-center text-sm mb-10">Comprehensive analysis powered by Google Gemini</p>
+          {/* Features */}
+          <section className="max-w-5xl mx-auto px-6 py-20 border-t border-edge/30">
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-jade/60 text-center mb-3">
+              Capabilities
+            </p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-center mb-12 text-cream">
+              What You Get
+            </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {FEATURES.map((feature) => (
                 <div
                   key={feature.title}
-                  className="p-5 rounded-2xl bg-gray-900/30 border border-gray-800/30 hover:border-gray-700/50 transition-all duration-300 group"
+                  className="p-5 rounded-2xl bg-surface/40 border border-edge/40 hover:border-edge-hover transition-all duration-300 group"
                 >
-                  <span className="text-2xl mb-3 block">{feature.icon}</span>
-                  <h3 className="font-semibold text-white text-sm mb-1.5">{feature.title}</h3>
-                  <p className="text-gray-500 text-xs leading-relaxed">{feature.description}</p>
+                  <span className="text-gold/50 text-xl mb-3 block group-hover:text-gold/80 transition-colors duration-300">
+                    {feature.icon}
+                  </span>
+                  <h3 className="font-semibold text-cream text-sm mb-1.5">{feature.title}</h3>
+                  <p className="font-body text-dust text-sm leading-relaxed">{feature.description}</p>
                 </div>
               ))}
             </div>
           </section>
 
-          {/* ─── Documentation Sections Preview ─── */}
-          <section className="max-w-5xl mx-auto px-6 py-16">
-            <h2 className="text-2xl font-bold text-center mb-2 text-white">11-Section Deep Analysis</h2>
-            <p className="text-gray-500 text-center text-sm mb-10">Every report covers these areas</p>
+          {/* 11 Sections */}
+          <section className="max-w-5xl mx-auto px-6 py-20 border-t border-edge/30">
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-coral/60 text-center mb-3">
+              Coverage
+            </p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-center mb-12 text-cream">
+              11-Section Deep Analysis
+            </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {[
                 "Repository Overview",
-                "High-Level Architecture",
-                "Key Components Deep Dive",
-                "Data Flow Analysis",
-                "Important Algorithms & Logic",
+                "Architecture & Design",
+                "Module Breakdown",
+                "Core Execution Flow",
+                "API Surface",
+                "Key Business Logic",
+                "Data Flow & State Management",
                 "Configuration & Environment",
-                "Error Handling & Edge Cases",
-                "Testing Strategies",
-                "Performance Considerations",
-                "Security Analysis",
-                "Interview Prep Notes",
+                "Dependencies & Tech Stack",
+                "Strengths & Weaknesses",
+                "Quick Reference",
               ].map((section, i) => (
                 <div
                   key={section}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-900/20 border border-gray-800/20 text-sm"
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl bg-surface/25 border border-edge/25 text-sm group hover:border-gold/20 transition-all duration-300"
                 >
-                  <span className="text-indigo-400/60 font-mono text-xs min-w-[1.5rem]">{String(i + 1).padStart(2, "0")}</span>
-                  <span className="text-gray-300">{section}</span>
+                  <span className="font-mono text-xs text-gold/30 group-hover:text-gold/60 transition-colors min-w-[1.5rem]">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="text-cream-dim font-body">{section}</span>
                 </div>
               ))}
             </div>
           </section>
-        </>
+        </div>
       )}
 
-      {/* ─── Footer ─── */}
-      <footer className="border-t border-gray-800/50 mt-8">
-        <div className="max-w-5xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🔍</span>
-            <span className="font-semibold text-sm text-gray-400">ghexplainer</span>
+      {/* ═══ Footer ═══ */}
+      <footer className="relative z-10 border-t border-edge/30 mt-8">
+        <div className="max-w-5xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <Logo size={24} />
+            <span className="font-bold text-sm text-gold/70">ghexplainer</span>
           </div>
-          <div className="flex items-center gap-6 text-xs text-gray-600">
+          <div className="flex items-center gap-5 text-xs text-faint font-mono">
             <span>Public repos only</span>
-            <span>•</span>
+            <span className="text-edge">|</span>
             <span>No code stored</span>
-            <span>•</span>
+            <span className="text-edge">|</span>
             <a
               href="https://github.com/meet1785/ghexplainer"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-gray-500 hover:text-indigo-400 transition-colors"
+              className="text-dust hover:text-gold transition-colors duration-300"
             >
-              GitHub Repository ↗
+              GitHub →
             </a>
           </div>
         </div>

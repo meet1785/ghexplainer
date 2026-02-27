@@ -12,16 +12,12 @@ interface AnalysisOutputProps {
   chunks: number;
   durationMs: number;
   cached: boolean;
-  /** Whether the analysis has fully completed */
   complete: boolean;
-  /** Current analysis phase (e.g. "chunk-3/7", "cross-module", "complete") */
   phase: string;
   onReset: () => void;
-  /** Retry/continue the analysis */
   onRetry?: () => void;
 }
 
-/** User-friendly phase label */
 function phaseLabel(phase: string): string {
   if (!phase || phase === "complete") return "";
   if (phase === "interrupted") return "Connection interrupted";
@@ -57,15 +53,15 @@ export default function AnalysisOutput({
   };
 
   return (
-    <div className="w-full bg-[#030712]">
+    <div className="w-full">
       {/* Sticky header bar */}
-      <div className="sticky top-0 z-20 bg-[#030712]/80 backdrop-blur-xl border-b border-gray-800/50">
+      <div className="sticky top-0 z-20 bg-midnight/80 backdrop-blur-xl border-b border-edge">
         <div className="max-w-5xl mx-auto px-6 py-3 flex flex-wrap items-center justify-between gap-3">
-          {/* Repo info */}
+          {/* Left: back + repo info */}
           <div className="flex items-center gap-3">
             <button
               onClick={onReset}
-              className="p-2 rounded-lg hover:bg-gray-800/50 text-gray-400 hover:text-white transition-colors"
+              className="p-2 rounded-lg hover:bg-surface text-dust hover:text-cream transition-colors duration-300"
               title="Back to home"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -77,158 +73,147 @@ export default function AnalysisOutput({
                 href={`https://github.com/${repoInfo.owner}/${repoInfo.repo}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm font-semibold text-white hover:text-indigo-300 transition-colors"
+                className="font-mono text-sm font-semibold text-cream hover:text-gold transition-colors"
               >
                 {repoInfo.owner}/{repoInfo.repo}
               </a>
               {cached && (
-                <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
+                <span className="px-1.5 py-0.5 text-[10px] font-mono bg-jade/10 text-jade border border-jade/20 rounded">
                   CACHED
                 </span>
               )}
               {isStreaming && (
-                <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded animate-pulse">
+                <span className="px-1.5 py-0.5 text-[10px] font-mono bg-gold/10 text-gold border border-gold/20 rounded animate-pulse">
                   STREAMING
                 </span>
               )}
             </div>
           </div>
 
-          {/* Stats */}
-          <div className="hidden sm:flex items-center gap-3 text-[11px] text-gray-500">
+          {/* Center: stats */}
+          <div className="hidden sm:flex items-center gap-3 text-[11px] text-faint font-mono">
             {repoInfo.stars > 0 && <span>⭐ {repoInfo.stars.toLocaleString()}</span>}
-            {repoInfo.language && <span>• {repoInfo.language}</span>}
-            <span>• {filesAnalyzed} files</span>
-            <span>• {chunks} chunks</span>
-            {durationMs > 0 && <span>• {(durationMs / 1000).toFixed(1)}s</span>}
+            {repoInfo.language && <span>· {repoInfo.language}</span>}
+            <span>· {filesAnalyzed} files</span>
+            <span>· {chunks} chunks</span>
+            {durationMs > 0 && <span>· {(durationMs / 1000).toFixed(1)}s</span>}
           </div>
 
-          {/* Actions */}
+          {/* Right: actions */}
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopyMarkdown}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all duration-200 ${
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border font-mono transition-all duration-300 ${
                 copied
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                  : "border-gray-700/50 text-gray-400 hover:text-white hover:border-gray-600"
+                  ? "border-jade/30 bg-jade/10 text-jade"
+                  : "border-edge text-dust hover:text-cream hover:border-edge-hover"
               }`}
             >
-              {copied ? (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                  Copy
-                </>
-              )}
+              {copied ? "✓ Copied" : "Copy"}
             </button>
             <button
               onClick={handleDownloadMarkdown}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors shadow-sm"
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gold text-midnight font-semibold hover:bg-gold-bright transition-colors shadow-sm"
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
               Download .md
             </button>
           </div>
         </div>
       </div>
 
-      {/* Analysis meta card */}
+      {/* Meta card */}
       <div className="max-w-4xl mx-auto px-6 pt-8 pb-4">
-        <div className="p-5 rounded-2xl bg-gradient-to-r from-indigo-500/5 to-purple-500/5 border border-gray-800/30">
+        <div className="p-5 rounded-2xl bg-surface/60 border border-edge">
           <div className="flex flex-wrap gap-6">
             <div>
-              <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Repository</p>
-              <p className="text-sm font-medium text-white">{repoInfo.owner}/{repoInfo.repo}</p>
+              <p className="text-[10px] uppercase tracking-[0.15em] text-faint font-mono mb-1">Repository</p>
+              <p className="font-mono text-sm font-medium text-cream">{repoInfo.owner}/{repoInfo.repo}</p>
             </div>
             {repoInfo.description && (
               <div className="flex-1 min-w-[200px]">
-                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Description</p>
-                <p className="text-sm text-gray-400 line-clamp-1">{repoInfo.description}</p>
+                <p className="text-[10px] uppercase tracking-[0.15em] text-faint font-mono mb-1">Description</p>
+                <p className="font-body italic text-sm text-dust line-clamp-1">{repoInfo.description}</p>
               </div>
             )}
             <div>
-              <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Analysis</p>
-              <p className="text-sm text-gray-400">{filesAnalyzed} files across {chunks} module{chunks !== 1 ? "s" : ""}</p>
+              <p className="text-[10px] uppercase tracking-[0.15em] text-faint font-mono mb-1">Analysis</p>
+              <p className="text-sm text-dust font-mono">{filesAnalyzed} files / {chunks} module{chunks !== 1 ? "s" : ""}</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Rendered markdown */}
+      {/* Markdown content */}
       <div className="max-w-4xl mx-auto px-6 pb-16">
-        {/* Streaming in-progress banner */}
+        {/* Streaming banner */}
         {isStreaming && (
-          <div className="mb-4 p-4 rounded-xl bg-amber-950/30 border border-amber-800/30 flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+          <div className="mb-4 p-4 rounded-xl bg-gold/5 border border-gold/20 flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-gold animate-pulse shrink-0" />
             <div>
-              <p className="text-sm font-medium text-amber-200">Analysis in progress…</p>
+              <p className="text-sm font-medium text-gold">Analysis in progress…</p>
               {phaseLabel(phase) && (
-                <p className="text-xs text-amber-400/70 mt-0.5">Current step: {phaseLabel(phase)}</p>
+                <p className="text-xs text-gold/60 mt-0.5 font-mono">Step: {phaseLabel(phase)}</p>
               )}
-              <p className="text-xs text-amber-400/50 mt-0.5">Partial results shown below — updates as more modules complete.</p>
+              <p className="text-xs text-gold/40 mt-0.5 font-body italic">
+                Partial results shown below — updates as more modules complete.
+              </p>
             </div>
           </div>
         )}
 
-        {/* Incomplete analysis banner (connection dropped) */}
+        {/* Interrupted banner */}
         {!complete && phase === "interrupted" && (
-          <div className="mb-4 p-4 rounded-xl bg-orange-950/30 border border-orange-800/30 flex items-center justify-between gap-3">
+          <div className="mb-4 p-4 rounded-xl bg-coral/10 border border-coral/20 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <span className="text-orange-400 text-lg">⚠️</span>
+              <span className="text-coral text-lg">⚠</span>
               <div>
-                <p className="text-sm font-medium text-orange-200">Response is incomplete</p>
-                <p className="text-xs text-orange-400/70 mt-0.5">Connection was interrupted. Partial results shown below.</p>
+                <p className="text-sm font-medium text-coral">Response is incomplete</p>
+                <p className="text-xs text-coral/60 mt-0.5 font-body italic">
+                  Connection was interrupted. Partial results shown below.
+                </p>
               </div>
             </div>
             {onRetry && (
               <button
                 onClick={onRetry}
-                className="shrink-0 text-xs px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white transition-colors"
+                className="shrink-0 text-xs px-4 py-2 rounded-lg bg-coral text-midnight font-semibold hover:bg-coral/90 transition-colors"
               >
                 Retry Full Analysis
               </button>
             )}
           </div>
         )}
-        <article className="prose-custom prose prose-invert prose-sm max-w-none p-8 sm:p-10 rounded-2xl bg-gray-950/50 border border-gray-800/30">
+
+        {/* Rendered markdown */}
+        <article className="prose-custom prose prose-invert prose-sm max-w-none p-8 sm:p-10 rounded-2xl bg-panel/50 border border-edge">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {markdown}
           </ReactMarkdown>
         </article>
 
         {/* Bottom actions */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mt-6 pt-6 border-t border-gray-800/30">
+        <div className="flex flex-wrap items-center justify-between gap-4 mt-6 pt-6 border-t border-edge/40">
           <button
             onClick={onReset}
-            className="flex items-center gap-2 text-sm px-5 py-2.5 rounded-xl border border-gray-700/50 text-gray-400 hover:text-white hover:border-gray-600 transition-all duration-200"
+            className="flex items-center gap-2 text-sm px-5 py-2.5 rounded-xl border border-edge text-dust hover:text-cream hover:border-edge-hover transition-all duration-300"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
-            Analyze Another Repo
+            Analyze Another
           </button>
           <div className="flex items-center gap-3">
             <button
               onClick={handleCopyMarkdown}
-              className="text-xs px-4 py-2 rounded-lg border border-gray-700/50 text-gray-400 hover:text-white hover:border-gray-600 transition-all duration-200"
+              className="text-xs px-4 py-2 rounded-lg border border-edge text-dust hover:text-cream hover:border-edge-hover font-mono transition-all duration-300"
             >
-              {copied ? "✓ Copied!" : "📋 Copy Markdown"}
+              {copied ? "✓ Copied!" : "Copy Markdown"}
             </button>
             <button
               onClick={handleDownloadMarkdown}
-              className="text-xs px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+              className="text-xs px-4 py-2 rounded-lg bg-gold text-midnight font-semibold hover:bg-gold-bright transition-colors"
             >
-              📥 Download .md
+              Download .md
             </button>
           </div>
         </div>

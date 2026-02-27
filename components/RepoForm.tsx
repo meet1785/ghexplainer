@@ -10,10 +10,10 @@ interface RepoFormProps {
 }
 
 const EXAMPLES = [
-  { url: "https://github.com/pallets/flask", label: "pallets/flask", icon: "🐍" },
-  { url: "https://github.com/expressjs/express", label: "expressjs/express", icon: "🟢" },
-  { url: "https://github.com/fastapi/fastapi", label: "fastapi/fastapi", icon: "⚡" },
-  { url: "https://github.com/gin-gonic/gin", label: "gin-gonic/gin", icon: "🔵" },
+  { url: "https://github.com/pallets/flask", label: "pallets/flask", lang: "Python" },
+  { url: "https://github.com/expressjs/express", label: "expressjs/express", lang: "JS" },
+  { url: "https://github.com/fastapi/fastapi", label: "fastapi/fastapi", lang: "Python" },
+  { url: "https://github.com/gin-gonic/gin", label: "gin-gonic/gin", lang: "Go" },
 ];
 
 export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
@@ -33,7 +33,7 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
         <div className="relative flex gap-3">
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-              <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-4 h-4 text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
               </svg>
             </div>
@@ -43,13 +43,13 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://github.com/owner/repo"
               disabled={loading}
-              className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-700/50 bg-gray-900/80 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 disabled:opacity-50 text-sm font-mono backdrop-blur-sm transition-all duration-200"
+              className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-edge bg-surface/80 text-cream placeholder-faint focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold/40 disabled:opacity-50 text-sm font-mono backdrop-blur-sm transition-all duration-300"
             />
           </div>
           <button
             type="submit"
             disabled={loading || !url.trim()}
-            className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:from-gray-700 disabled:to-gray-700 disabled:cursor-not-allowed text-white font-semibold transition-all duration-200 text-sm shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 disabled:shadow-none"
+            className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-gold to-coral hover:from-gold-bright hover:to-coral disabled:from-faint disabled:to-faint disabled:cursor-not-allowed text-midnight font-bold transition-all duration-300 text-sm shadow-lg shadow-gold/10 hover:shadow-gold/20 disabled:shadow-none"
           >
             {loading ? (
               <span className="flex items-center gap-2">
@@ -67,16 +67,16 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
 
         {/* Mode toggle */}
         <div className="flex items-center gap-3">
-          <span className="text-[11px] text-gray-600 uppercase tracking-wide font-medium">Mode:</span>
-          <div className="flex rounded-lg border border-gray-800/50 overflow-hidden">
+          <span className="text-[11px] text-faint uppercase tracking-[0.15em] font-mono">Mode:</span>
+          <div className="flex rounded-lg border border-edge overflow-hidden">
             <button
               type="button"
               onClick={() => setMode("stream")}
               disabled={loading}
-              className={`flex items-center gap-1.5 text-xs px-3.5 py-1.5 transition-all duration-200 ${
+              className={`flex items-center gap-1.5 text-xs px-3.5 py-1.5 font-mono transition-all duration-300 ${
                 mode === "stream"
-                  ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"
-                  : "bg-gray-900/30 text-gray-500 hover:text-gray-300"
+                  ? "bg-gold/10 text-gold border-r border-gold/20"
+                  : "bg-surface/30 text-faint hover:text-dust border-r border-edge"
               } disabled:opacity-40`}
             >
               <span>⚡</span>
@@ -86,33 +86,33 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
               type="button"
               onClick={() => setMode("complete")}
               disabled={loading}
-              className={`flex items-center gap-1.5 text-xs px-3.5 py-1.5 border-l border-gray-800/50 transition-all duration-200 ${
+              className={`flex items-center gap-1.5 text-xs px-3.5 py-1.5 font-mono transition-all duration-300 ${
                 mode === "complete"
-                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                  : "bg-gray-900/30 text-gray-500 hover:text-gray-300"
+                  ? "bg-jade/10 text-jade"
+                  : "bg-surface/30 text-faint hover:text-dust"
               } disabled:opacity-40`}
             >
-              <span>📋</span>
+              <span>◆</span>
               <span>Complete</span>
             </button>
           </div>
-          <span className="text-[10px] text-gray-600">
+          <span className="text-[10px] text-faint font-body italic">
             {mode === "stream" ? "Live progress as modules are analyzed" : "Waits for full result — more reliable for large repos"}
           </span>
         </div>
 
         {/* Example repos */}
         <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-[11px] text-gray-600 uppercase tracking-wide font-medium">Try an example:</span>
+          <span className="text-[11px] text-faint uppercase tracking-[0.15em] font-mono">Try:</span>
           {EXAMPLES.map((ex) => (
             <button
               key={ex.url}
               type="button"
               onClick={() => setUrl(ex.url)}
               disabled={loading}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-800/50 bg-gray-900/30 text-gray-400 hover:text-indigo-300 hover:border-indigo-500/30 hover:bg-indigo-500/5 transition-all duration-200 disabled:opacity-40"
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-edge bg-surface/30 text-dust hover:text-gold hover:border-gold/30 transition-all duration-300 disabled:opacity-40 font-mono"
             >
-              <span>{ex.icon}</span>
+              <span className="text-[10px] text-faint">{ex.lang}</span>
               <span>{ex.label}</span>
             </button>
           ))}
