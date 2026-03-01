@@ -269,6 +269,74 @@
 }
 
 /* ══════════════════════════════════════════
+   Chat Panel Prose
+   ══════════════════════════════════════════ */
+
+.prose-chat {
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+.prose-chat p {
+  margin: 0.4rem 0;
+  color: #c8c4b9;
+}
+.prose-chat strong {
+  color: #e8e4d9;
+  font-weight: 600;
+}
+.prose-chat code {
+  font-family: var(--font-jetbrains-mono), monospace;
+  color: #70b0f0;
+  background: #111318;
+  border: 1px solid #24272f;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.8em;
+}
+.prose-chat pre {
+  background: #0c0e14;
+  border: 1px solid #1e2128;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+  padding: 0.75rem;
+}
+.prose-chat pre code {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: #c8c4b9;
+}
+.prose-chat ul, .prose-chat ol {
+  color: #c8c4b9;
+  padding-left: 1.25rem;
+  margin: 0.3rem 0;
+}
+.prose-chat li {
+  margin: 0.15rem 0;
+}
+.prose-chat li::marker {
+  color: #f0a040;
+}
+.prose-chat h1, .prose-chat h2, .prose-chat h3 {
+  color: #e8e4d9;
+  font-weight: 600;
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.prose-chat a {
+  color: #40c0a0;
+  text-decoration: underline;
+}
+.prose-chat blockquote {
+  border-left: 2px solid #f0a040;
+  padding-left: 0.75rem;
+  color: #8e8e9e;
+  font-style: italic;
+  margin: 0.5rem 0;
+}
+
+/* ══════════════════════════════════════════
    Tab active indicator line
    ══════════════════════════════════════════ */
 

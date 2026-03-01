@@ -140,7 +140,7 @@ export async function analyzeRepo(
  */
 export type StreamEvent =
   | { type: "progress"; step: string }
-  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number }
+  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number; filePaths?: string[]; moduleChunks?: Array<{ module: string; files: Array<{ path: string; content: string }>; totalChars: number; dependencies: string[] }>; fileData?: Array<{ path: string; content: string }> }
   | { type: "partial"; markdown: string; phase: string; complete: boolean }
   | { type: "done"; markdown: string; durationMs: number; cached: boolean }
   | { type: "error"; message: string };
@@ -189,8 +189,23 @@ export async function* analyzeRepoStream(
   yield { type: "progress", step: "Chunking code by module…" };
   const chunks: CodeChunk[] = chunkByModule(files);
 
-  // Send metadata so client can show repo info immediately
-  yield { type: "meta", repoInfo, filesAnalyzed: files.length, chunks: chunks.length };
+  // Send metadata + file data for metrics/graph features
+  const filePaths = tree.filter(f => f.type === "blob").map(f => f.path);
+  const moduleChunks = chunks.map(c => ({
+    module: c.module,
+    files: c.files.map(f => ({ path: f.path, content: f.content })),
+    totalChars: c.totalChars,
+    dependencies: c.dependencies,
+  }));
+  yield {
+    type: "meta",
+    repoInfo,
+    filesAnalyzed: files.length,
+    chunks: chunks.length,
+    filePaths,
+    moduleChunks,
+    fileData: files.map(f => ({ path: f.path, content: f.content })),
+  };
 
   // Step 6: Stream Gemini analysis — yields partial markdown after each call
   let lastMarkdown = "";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import RepoForm from "@/components/RepoForm";
 import type { AnalysisMode } from "@/components/RepoForm";
 import LoadingState from "@/components/LoadingState";
@@ -8,10 +8,19 @@ import AnalysisOutput from "@/components/AnalysisOutput";
 import HistoryPanel from "@/components/HistoryPanel";
 import DemoShowcase from "@/components/DemoShowcase";
 import Logo from "@/components/Logo";
+import ChatPanel from "@/components/ChatPanel";
+import CommandPalette, { type CommandAction } from "@/components/CommandPalette";
 import { saveAnalysis, type SavedAnalysis } from "@/lib/history";
 import type { RepoInfo } from "@/lib/github";
 
 type AppState = "idle" | "loading" | "done" | "error";
+
+interface ModuleChunk {
+  module: string;
+  files: Array<{ path: string; content: string }>;
+  totalChars: number;
+  dependencies: string[];
+}
 
 interface AnalysisData {
   markdown: string;
@@ -22,6 +31,9 @@ interface AnalysisData {
   cached: boolean;
   complete: boolean;
   phase: string;
+  filePaths?: string[];
+  moduleChunks?: ModuleChunk[];
+  fileData?: Array<{ path: string; content: string }>;
 }
 
 const HOW_IT_WORKS = [
@@ -49,6 +61,7 @@ export default function Home() {
   const [lastUrl, setLastUrl] = useState<string>("");
   const [lastMode, setLastMode] = useState<AnalysisMode>("stream");
   const [historyKey, setHistoryKey] = useState(0);
+  const [chatOpen, setChatOpen] = useState(false);
 
   /* ── Handlers (logic preserved from original) ── */
 
@@ -197,6 +210,9 @@ export default function Home() {
     let filesAnalyzed = 0;
     let chunks = 0;
     let hasShownResult = false;
+    let filePaths: string[] | undefined;
+    let moduleChunks: ModuleChunk[] | undefined;
+    let fileData: Array<{ path: string; content: string }> | undefined;
 
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
@@ -245,6 +261,9 @@ export default function Home() {
               repoInfo = event.repoInfo;
               filesAnalyzed = event.filesAnalyzed ?? 0;
               chunks = event.chunks ?? 0;
+              filePaths = event.filePaths;
+              moduleChunks = event.moduleChunks;
+              fileData = event.fileData;
               break;
             case "partial":
               partialMarkdown = event.markdown ?? "";
@@ -260,6 +279,9 @@ export default function Home() {
                   cached: false,
                   complete: event.complete ?? false,
                   phase: event.phase ?? "",
+                  filePaths,
+                  moduleChunks,
+                  fileData,
                 };
                 setResult(partialData);
                 saveToHistory(partialData, url);
@@ -277,6 +299,9 @@ export default function Home() {
                   cached: false,
                   complete: event.complete ?? false,
                   phase: event.phase ?? "",
+                  filePaths,
+                  moduleChunks,
+                  fileData,
                 };
                 setResult(updatedData);
                 saveToHistory(updatedData, url);
@@ -295,6 +320,9 @@ export default function Home() {
                   cached: event.cached ?? false,
                   complete: true,
                   phase: "complete",
+                  filePaths,
+                  moduleChunks,
+                  fileData,
                 };
                 setResult(doneData);
                 saveToHistory(doneData, url);
@@ -327,6 +355,9 @@ export default function Home() {
           cached: false,
           complete: false,
           phase: "interrupted",
+          filePaths,
+          moduleChunks,
+          fileData,
         };
         setResult(partialData);
         saveToHistory(partialData, url);
@@ -365,6 +396,94 @@ export default function Home() {
     if (mode === "complete") handleAnalyzeComplete(url);
     else handleAnalyze(url);
   }, [handleAnalyze, handleAnalyzeComplete]);
+
+  /* ── Command Palette actions ── */
+  const commands: CommandAction[] = useMemo(() => {
+    const cmds: CommandAction[] = [
+      {
+        id: "home",
+        label: "Go to Home",
+        description: "Reset and return to the landing page",
+        category: "Navigation",
+        icon: "⌂",
+        shortcut: "⌘H",
+        action: handleReset,
+      },
+      {
+        id: "scroll-top",
+        label: "Scroll to Top",
+        description: "Jump to the top of the page",
+        category: "Navigation",
+        icon: "↑",
+        action: () => window.scrollTo({ top: 0, behavior: "smooth" }),
+      },
+      {
+        id: "toggle-chat",
+        label: chatOpen ? "Close Chat Panel" : "Open Chat Panel",
+        description: "Ask follow-up questions about the analyzed repo",
+        category: "View",
+        icon: "💬",
+        shortcut: "⌘J",
+        action: () => setChatOpen(o => !o),
+        disabled: state !== "done",
+      },
+    ];
+
+    if (state === "done" && result) {
+      cmds.push(
+        {
+          id: "copy-md",
+          label: "Copy Markdown",
+          description: "Copy analysis output to clipboard",
+          category: "Export",
+          icon: "📋",
+          shortcut: "⌘C",
+          action: () => navigator.clipboard.writeText(result.markdown),
+        },
+        {
+          id: "download-md",
+          label: "Download .md File",
+          description: "Save analysis as a Markdown file",
+          category: "Export",
+          icon: "↓",
+          action: () => {
+            const blob = new Blob([result.markdown], { type: "text/markdown" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${result.repoInfo.repo}-analysis.md`;
+            a.click();
+            URL.revokeObjectURL(url);
+          },
+        },
+        {
+          id: "retry",
+          label: "Retry Analysis",
+          description: "Re-run the analysis on the same repository",
+          category: "Analysis",
+          icon: "↻",
+          action: handleRetry,
+        },
+      );
+    }
+
+    cmds.push(
+      {
+        id: "github",
+        label: "View on GitHub",
+        description: "Open the ghexplainer repository",
+        category: "Help",
+        icon: "◆",
+        action: () => window.open("https://github.com/meet1785/ghexplainer", "_blank"),
+      },
+    );
+
+    return cmds;
+  }, [state, result, chatOpen, handleReset, handleRetry]);
+
+  /* ── Cmd+J shortcut for chat ── */
+  // Handled via useEffect
+  // (CommandPalette handles Cmd+K internally)
 
   /* ── Render ── */
 
@@ -450,6 +569,9 @@ export default function Home() {
             phase={result.phase}
             onReset={handleReset}
             onRetry={handleRetry}
+            filePaths={result.filePaths}
+            moduleChunks={result.moduleChunks}
+            fileData={result.fileData}
           />
         </div>
       )}
@@ -577,6 +699,19 @@ export default function Home() {
           </div>
         </div>
       </footer>
+
+      {/* ═══ Command Palette (Cmd+K) ═══ */}
+      <CommandPalette commands={commands} />
+
+      {/* ═══ AI Chat Panel ═══ */}
+      {state === "done" && result && (
+        <ChatPanel
+          analysisMarkdown={result.markdown}
+          repoSlug={`${result.repoInfo.owner}/${result.repoInfo.repo}`}
+          isOpen={chatOpen}
+          onToggle={() => setChatOpen(o => !o)}
+        />
+      )}
     </main>
   );
 }
