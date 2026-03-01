@@ -265,6 +265,27 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
     return { nodes: [], edges: [] };
   }, [markdown, filePaths, modules]);
 
+  // Compute per-node degree (connectivity)
+  const nodeDegreeMap = useMemo(() => {
+    const deg = new Map<string, number>();
+    for (const edge of graphData.edges) {
+      deg.set(edge.source, (deg.get(edge.source) ?? 0) + 1);
+      deg.set(edge.target, (deg.get(edge.target) ?? 0) + 1);
+    }
+    return deg;
+  }, [graphData]);
+
+  // Modularity score: ratio of internal edges to possible edges — 0 (star) to 1 (fully connected mesh)
+  const modularityScore = useMemo(() => {
+    const n = graphData.nodes.length;
+    if (n < 2) return 1;
+    const maxEdges = (n * (n - 1)) / 2;
+    const actualEdges = graphData.edges.length;
+    // Spread (many sparse modules) = high score; dense hub = low score
+    const densityPenalty = actualEdges / maxEdges;
+    return Math.max(0, Math.min(1, 1 - densityPenalty));
+  }, [graphData]);
+
   // Initialize nodes/edges
   useEffect(() => {
     nodesRef.current = graphData.nodes.map(n => ({ ...n }));
@@ -379,6 +400,17 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-jade/10 border border-jade/20 text-jade font-mono">
             {nodes.length} modules · {edges.length} links
           </span>
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full font-mono"
+            style={{
+              color: modularityScore >= 0.6 ? "#40c0a0" : modularityScore >= 0.3 ? "#f0a040" : "#e06070",
+              backgroundColor: modularityScore >= 0.6 ? "#40c0a010" : modularityScore >= 0.3 ? "#f0a04010" : "#e0607010",
+              border: `1px solid ${modularityScore >= 0.6 ? "#40c0a040" : modularityScore >= 0.3 ? "#f0a04040" : "#e0607040"}`,
+            }}
+            title="Modularity score: how well-separated the modules are (higher = better)"
+          >
+            modularity {(modularityScore * 100).toFixed(0)}%
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -466,6 +498,10 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
                   )
                 : false;
               const dimmed = hoveredNode && !isHovered && !isConnected;
+              const degree = nodeDegreeMap.get(node.id) ?? 0;
+              const maxDegree = Math.max(...[...nodeDegreeMap.values()], 1);
+              // Critical node: top 20% by degree and at least 3 connections
+              const isCritical = degree >= 3 && degree / maxDegree >= 0.6;
 
               return (
                 <g
@@ -477,6 +513,20 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
                   className="cursor-pointer"
                   style={{ opacity: dimmed ? 0.2 : 1, transition: "opacity 0.3s" }}
                 >
+                  {/* Critical node ring */}
+                  {isCritical && !isHovered && (
+                    <circle
+                      r={radius + 5}
+                      fill="none"
+                      stroke="#e06070"
+                      strokeWidth="1.5"
+                      strokeDasharray="3 3"
+                      opacity={0.6}
+                    >
+                      <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="8s" repeatCount="indefinite" />
+                    </circle>
+                  )}
+
                   {/* Glow */}
                   {isHovered && (
                     <circle r={radius + 8} fill={node.color} opacity={0.15}>
@@ -488,8 +538,8 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
                   <circle
                     r={radius}
                     fill={isHovered ? node.color : `${node.color}20`}
-                    stroke={node.color}
-                    strokeWidth={isHovered ? 2.5 : 1.5}
+                    stroke={isCritical ? "#e06070" : node.color}
+                    strokeWidth={isHovered ? 2.5 : isCritical ? 2 : 1.5}
                   />
 
                   {/* File count badge */}
@@ -532,9 +582,19 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
           const node = nodeMap.get(hoveredNode);
           if (!node) return null;
           const connections = edges.filter(e => e.source === hoveredNode || e.target === hoveredNode).length;
+          const degree = nodeDegreeMap.get(hoveredNode) ?? 0;
+          const maxDegree = Math.max(...[...nodeDegreeMap.values()], 1);
+          const isCritical = degree >= 3 && degree / maxDegree >= 0.6;
           return (
             <div className="absolute top-3 left-3 px-3 py-2 rounded-lg bg-surface/95 border border-edge backdrop-blur-sm text-xs pointer-events-none">
-              <p className="font-mono font-semibold text-cream">{node.label}</p>
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className="font-mono font-semibold text-cream">{node.label}</p>
+                {isCritical && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-coral/10 text-coral border border-coral/20">
+                    CRITICAL
+                  </span>
+                )}
+              </div>
               <p className="text-faint mt-0.5">{node.fileCount} files · {connections} connections</p>
               {node.totalChars > 0 && (
                 <p className="text-faint">{(node.totalChars / 1000).toFixed(1)}K chars</p>
@@ -546,6 +606,10 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
         {/* Legend */}
         <div className="absolute bottom-3 left-3 flex items-center gap-3 text-[10px] text-faint font-mono">
           <span>Drag nodes · Scroll to zoom · Hover to highlight</span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-3 h-3 rounded-full border border-coral/60" style={{ borderStyle: "dashed" }} />
+            Critical hub
+          </span>
         </div>
       </div>
     </div>

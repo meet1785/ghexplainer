@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { RepoInfo } from "@/lib/github";
 import DependencyGraph from "./DependencyGraph";
 import MetricsDashboard from "./MetricsDashboard";
 import TableOfContents from "./TableOfContents";
+import { computeProjectMetrics } from "@/lib/metrics";
 
 interface AnalysisOutputProps {
   markdown: string;
@@ -59,6 +60,12 @@ export default function AnalysisOutput({
   const [activeTab, setActiveTab] = useState<"report" | "metrics" | "graph">("report");
   const isStreaming = !complete && phase !== "complete";
   const articleRef = useRef<HTMLElement>(null);
+
+  // Compute health score from file data for the header badge
+  const healthScore = useMemo(() => {
+    if (!fileData || fileData.length === 0) return null;
+    return computeProjectMetrics(fileData).healthScore;
+  }, [fileData]);
 
   const handleCopyMarkdown = async () => {
     await navigator.clipboard.writeText(markdown);
@@ -130,6 +137,19 @@ export default function AnalysisOutput({
             <span>· {filesAnalyzed} files</span>
             <span>· {chunks} chunks</span>
             {durationMs > 0 && <span>· {(durationMs / 1000).toFixed(1)}s</span>}
+            {healthScore !== null && (
+              <span
+                className="px-2 py-0.5 rounded font-mono text-[10px] font-semibold"
+                style={{
+                  color: healthScore >= 80 ? "#40c0a0" : healthScore >= 60 ? "#f0a040" : "#e06070",
+                  backgroundColor: healthScore >= 80 ? "#40c0a010" : healthScore >= 60 ? "#f0a04010" : "#e0607010",
+                  border: `1px solid ${healthScore >= 80 ? "#40c0a040" : healthScore >= 60 ? "#f0a04040" : "#e0607040"}`,
+                }}
+                title="Code Health Score"
+              >
+                ◎ {healthScore}/100
+              </span>
+            )}
           </div>
 
           {/* Right: actions */}

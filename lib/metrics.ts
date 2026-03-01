@@ -60,6 +60,21 @@ export interface ProjectMetrics {
   couplingScore: number;
   topComplexFiles: FileMetrics[];
   topLargeFiles: FileMetrics[];
+  /** 0–100 overall code health score */
+  healthScore: number;
+  /** Score breakdown by dimension */
+  scoreBreakdown: {
+    complexity: number;   // 0–25
+    coupling: number;     // 0–20
+    fileSize: number;     // 0–15
+    highComplexity: number; // 0–20
+    documentation: number;  // 0–10
+    modularity: number;     // 0–10
+  };
+  /** Estimated technical debt in hours */
+  technicalDebtHours: number;
+  /** Actionable improvement recommendations */
+  recommendations: Array<{ severity: "high" | "medium" | "low"; message: string }>;
 }
 
 // ─── Language Detection ──────────────────────────────────────
@@ -261,6 +276,112 @@ function getModule(filePath: string): string {
   return parts.slice(0, Math.min(2, parts.length - 1)).join("/");
 }
 
+// ─── Health Score Computation ────────────────────────────────
+
+function computeScoreBreakdown(
+  avgComplexity: number,
+  couplingScore: number,
+  sizeDistribution: { small: number; medium: number; large: number },
+  complexityDistribution: { low: number; medium: number; high: number },
+  totalFiles: number,
+  moduleCount: number,
+  files: FileMetrics[],
+  totalLines: number,
+): ProjectMetrics["scoreBreakdown"] {
+  // 1. Complexity score: 25pts, penalty scales with avgComplexity
+  const complexityPenalty = Math.min(25, ((Math.max(1, avgComplexity) - 1) / 24) * 25);
+
+  // 2. Coupling score: 20pts, penalty scales with coupling ratio (>0.25 = bad)
+  const couplingPenalty = Math.min(20, (couplingScore / 0.25) * 20);
+
+  // 3. File size score: 15pts, penalty for large files
+  const largeFileFraction = totalFiles > 0 ? sizeDistribution.large / totalFiles : 0;
+  const fileSizePenalty = largeFileFraction * 15;
+
+  // 4. High complexity files score: 20pts
+  const highComplexFraction = totalFiles > 0 ? complexityDistribution.high / totalFiles : 0;
+  const highComplexPenalty = highComplexFraction * 20;
+
+  // 5. Documentation bonus: up to 10pts (ideal: 10–25% comment lines)
+  const totalCommentLines = files.reduce((s, f) => s + f.commentLines, 0);
+  const commentRatio = totalLines > 0 ? totalCommentLines / totalLines : 0;
+  const docBonus = Math.max(0, (1 - Math.abs(commentRatio - 0.175) / 0.175)) * 10;
+
+  // 6. Modularity bonus: up to 10pts (more modules relative to files = better separation)
+  const modularityRatio = totalFiles > 0 ? Math.min(1, moduleCount / (totalFiles * 0.3)) : 0;
+  const modularityBonus = modularityRatio * 10;
+
+  return {
+    complexity: Math.round((25 - complexityPenalty) * 10) / 10,
+    coupling: Math.round((20 - couplingPenalty) * 10) / 10,
+    fileSize: Math.round((15 - fileSizePenalty) * 10) / 10,
+    highComplexity: Math.round((20 - highComplexPenalty) * 10) / 10,
+    documentation: Math.round(docBonus * 10) / 10,
+    modularity: Math.round(modularityBonus * 10) / 10,
+  };
+}
+
+function computeTechnicalDebtHours(files: FileMetrics[]): number {
+  let debtHours = 0;
+  for (const f of files) {
+    if (f.complexity > 15) {
+      debtHours += 2 * (f.complexity - 15) + 5;
+    } else if (f.complexity > 5) {
+      debtHours += 0.5 * (f.complexity - 5);
+    }
+    if (f.loc > 200) {
+      debtHours += (f.loc - 200) / 100;
+    }
+  }
+  return Math.round(debtHours);
+}
+
+function buildRecommendations(
+  avgComplexity: number,
+  couplingScore: number,
+  sizeDistribution: { small: number; medium: number; large: number },
+  complexityDistribution: { low: number; medium: number; high: number },
+  totalFiles: number,
+  topComplexFiles: FileMetrics[],
+  topLargeFiles: FileMetrics[],
+): ProjectMetrics["recommendations"] {
+  const recs: ProjectMetrics["recommendations"] = [];
+
+  if (avgComplexity > 15) {
+    recs.push({ severity: "high", message: `Average cyclomatic complexity is ${avgComplexity.toFixed(1)} — refactor complex logic into smaller functions.` });
+  } else if (avgComplexity > 8) {
+    recs.push({ severity: "medium", message: `Average complexity of ${avgComplexity.toFixed(1)} is moderate — consider breaking up long conditional chains.` });
+  }
+
+  if (couplingScore > 0.25) {
+    recs.push({ severity: "high", message: "High coupling detected — modules import heavily from each other. Apply dependency inversion or create abstraction layers." });
+  } else if (couplingScore > 0.15) {
+    recs.push({ severity: "medium", message: "Moderate coupling detected — review import dependencies and consider extracting shared utilities." });
+  }
+
+  const largeFileFraction = totalFiles > 0 ? sizeDistribution.large / totalFiles : 0;
+  if (largeFileFraction > 0.3) {
+    const topFile = topLargeFiles[0];
+    recs.push({ severity: "high", message: `${Math.round(largeFileFraction * 100)}% of files exceed 200 LOC. Split large files like "${topFile?.path}" into smaller modules.` });
+  } else if (largeFileFraction > 0.15) {
+    recs.push({ severity: "medium", message: `${Math.round(largeFileFraction * 100)}% of files are large (>200 LOC). Consider splitting them for better maintainability.` });
+  }
+
+  const highComplexFraction = totalFiles > 0 ? complexityDistribution.high / totalFiles : 0;
+  if (highComplexFraction > 0.2 && topComplexFiles[0]) {
+    recs.push({ severity: "high", message: `${complexityDistribution.high} files have high cyclomatic complexity. Start refactoring "${topComplexFiles[0].path}" (complexity: ${topComplexFiles[0].complexity}).` });
+  }
+
+  if (recs.length < 3) {
+    recs.push({ severity: "low", message: "Add comprehensive unit tests — high complexity code is harder to test and more error-prone." });
+  }
+  if (recs.length < 4) {
+    recs.push({ severity: "low", message: "Consider adding JSDoc/docstring comments to public APIs to improve maintainability." });
+  }
+
+  return recs.slice(0, 5);
+}
+
 export function computeProjectMetrics(
   files: Array<{ path: string; content: string }>
 ): ProjectMetrics {
@@ -320,14 +441,48 @@ export function computeProjectMetrics(
     else sizeDist.large++;
   }
 
+  const couplingScore = totalLoc > 0 ? totalImports / totalLoc : 0;
+  const topComplexFiles = [...fileMetrics].sort((a, b) => b.complexity - a.complexity).slice(0, 5);
+  const topLargeFiles = [...fileMetrics].sort((a, b) => b.loc - a.loc).slice(0, 5);
+  const avgComplexity = fileMetrics.length > 0
+    ? fileMetrics.reduce((s, f) => s + f.complexity, 0) / fileMetrics.length
+    : 0;
+
+  const scoreBreakdown = computeScoreBreakdown(
+    avgComplexity,
+    couplingScore,
+    sizeDist,
+    complexityDist,
+    fileMetrics.length,
+    modules.length,
+    fileMetrics,
+    totalLines,
+  );
+  const healthScore = Math.max(0, Math.min(100, Math.round(
+    scoreBreakdown.complexity +
+    scoreBreakdown.coupling +
+    scoreBreakdown.fileSize +
+    scoreBreakdown.highComplexity +
+    scoreBreakdown.documentation +
+    scoreBreakdown.modularity,
+  )));
+  const technicalDebtHours = computeTechnicalDebtHours(fileMetrics);
+  const recommendations = buildRecommendations(
+    avgComplexity,
+    couplingScore,
+    sizeDist,
+    complexityDist,
+    fileMetrics.length,
+    topComplexFiles,
+    topLargeFiles,
+  );
+
   return {
     totalFiles: fileMetrics.length,
     totalLoc,
     totalLines,
     avgFileSize: fileMetrics.length > 0 ? totalLoc / fileMetrics.length : 0,
-    avgComplexity: fileMetrics.length > 0
-      ? fileMetrics.reduce((s, f) => s + f.complexity, 0) / fileMetrics.length
-      : 0,
+    avgComplexity,
     totalFunctions: fileMetrics.reduce((s, f) => s + f.functionCount, 0),
     totalClasses: fileMetrics.reduce((s, f) => s + f.classCount, 0),
     totalImports,
@@ -336,8 +491,12 @@ export function computeProjectMetrics(
     files: fileMetrics,
     complexityDistribution: complexityDist,
     sizeDistribution: sizeDist,
-    couplingScore: totalLoc > 0 ? totalImports / totalLoc : 0,
-    topComplexFiles: [...fileMetrics].sort((a, b) => b.complexity - a.complexity).slice(0, 5),
-    topLargeFiles: [...fileMetrics].sort((a, b) => b.loc - a.loc).slice(0, 5),
+    couplingScore,
+    topComplexFiles,
+    topLargeFiles,
+    healthScore,
+    scoreBreakdown,
+    technicalDebtHours,
+    recommendations,
   };
 }

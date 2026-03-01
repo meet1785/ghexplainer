@@ -7,11 +7,14 @@ import { computeProjectMetrics, type ProjectMetrics } from "@/lib/metrics";
  * Code Metrics Dashboard
  *
  * Visual display of code quality metrics computed from analyzed files:
+ * - Code Health Score (0-100) with grade + breakdown gauge
+ * - Technical debt estimator
  * - Language breakdown (donut chart via CSS conic-gradient)
  * - Module size comparison (horizontal bars)
  * - Complexity distribution
  * - Top files by size & complexity
  * - Coupling score
+ * - Smart recommendations
  *
  * Demonstrates: static analysis, data visualization with pure CSS,
  * responsive charts, metric computation, progressive disclosure.
@@ -43,6 +46,15 @@ const LANG_COLORS: Record<string, string> = {
   YAML: "#cb171e",
   Other: "#8e8e9e",
 };
+
+function scoreGrade(score: number): { grade: string; color: string } {
+  if (score >= 90) return { grade: "A+", color: "#40c0a0" };
+  if (score >= 80) return { grade: "A",  color: "#40c0a0" };
+  if (score >= 70) return { grade: "B",  color: "#70b0f0" };
+  if (score >= 60) return { grade: "C",  color: "#f0a040" };
+  if (score >= 50) return { grade: "D",  color: "#f0a040" };
+  return { grade: "F", color: "#e06070" };
+}
 
 function MetricCard({ label, value, sub, color = "gold" }: { label: string; value: string | number; sub?: string; color?: string }) {
   const colorClasses: Record<string, string> = {
@@ -147,6 +159,120 @@ function ComplexityIndicator({ score }: { score: number }) {
   );
 }
 
+/** Circular gauge for the 0-100 health score */
+function ScoreGauge({ score }: { score: number }) {
+  const { grade, color } = scoreGrade(score);
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  // Draw 270° arc (start at 225°, end at 135° going clockwise)
+  const arcLength = (score / 100) * circumference * 0.75; // 75% of full circle = 270°
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="relative w-32 h-32">
+        <svg viewBox="0 0 120 120" className="w-full h-full -rotate-[225deg]">
+          {/* Background track */}
+          <circle
+            cx="60" cy="60" r={radius}
+            fill="none"
+            stroke="#24272f"
+            strokeWidth="10"
+            strokeDasharray={`${circumference * 0.75} ${circumference * 0.25}`}
+            strokeLinecap="round"
+          />
+          {/* Score arc */}
+          <circle
+            cx="60" cy="60" r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth="10"
+            strokeDasharray={`${arcLength} ${circumference - arcLength}`}
+            strokeDashoffset={-(circumference * 0.25) / 2 + 0}
+            strokeLinecap="round"
+            style={{ transition: "stroke-dasharray 1s ease-out" }}
+          />
+        </svg>
+        {/* Center label */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-3xl font-extrabold font-mono" style={{ color }}>{score}</span>
+          <span className="text-[10px] text-faint font-mono uppercase tracking-wider">/ 100</span>
+        </div>
+      </div>
+      {/* Grade badge */}
+      <div
+        className="px-4 py-1.5 rounded-full text-sm font-bold font-mono border"
+        style={{ color, borderColor: `${color}40`, backgroundColor: `${color}15` }}
+      >
+        Grade {grade}
+      </div>
+      <p className="text-[11px] text-faint font-body text-center">Code Health Score</p>
+    </div>
+  );
+}
+
+/** Horizontal breakdown bar for score dimensions */
+function ScoreBreakdown({ breakdown }: { breakdown: ProjectMetrics["scoreBreakdown"] }) {
+  const items = [
+    { label: "Complexity", value: breakdown.complexity, max: 25 },
+    { label: "Low Coupling", value: breakdown.coupling, max: 20 },
+    { label: "File Sizes", value: breakdown.fileSize, max: 15 },
+    { label: "Simple Files", value: breakdown.highComplexity, max: 20 },
+    { label: "Documentation", value: breakdown.documentation, max: 10 },
+    { label: "Modularity", value: breakdown.modularity, max: 10 },
+  ];
+
+  return (
+    <div className="space-y-2">
+      {items.map((item) => {
+        const pct = Math.max(0, (item.value / item.max) * 100);
+        const color = pct >= 70 ? "#40c0a0" : pct >= 40 ? "#f0a040" : "#e06070";
+        return (
+          <div key={item.label} className="flex items-center gap-2">
+            <span className="text-[11px] text-faint font-mono w-28 shrink-0">{item.label}</span>
+            <div className="flex-1 h-2 bg-surface/60 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-700 ease-out"
+                style={{ width: `${pct}%`, backgroundColor: color }}
+              />
+            </div>
+            <span className="text-[11px] font-mono shrink-0 w-14 text-right" style={{ color }}>
+              {item.value.toFixed(1)}/{item.max}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Recommendations panel */
+function Recommendations({ recs }: { recs: ProjectMetrics["recommendations"] }) {
+  const severityConfig = {
+    high:   { label: "HIGH",   color: "#e06070", bg: "bg-coral/5 border-coral/20" },
+    medium: { label: "MED",    color: "#f0a040", bg: "bg-gold/5 border-gold/20"   },
+    low:    { label: "LOW",    color: "#70b0f0", bg: "bg-azure/5 border-azure/20" },
+  };
+
+  return (
+    <div className="space-y-2">
+      {recs.map((rec, i) => {
+        const cfg = severityConfig[rec.severity];
+        return (
+          <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${cfg.bg}`}>
+            <span
+              className="shrink-0 text-[9px] font-bold font-mono px-1.5 py-0.5 rounded mt-0.5"
+              style={{ color: cfg.color, backgroundColor: `${cfg.color}20` }}
+            >
+              {cfg.label}
+            </span>
+            <p className="text-[12px] text-dust font-body leading-relaxed">{rec.message}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function MetricsDashboard({ files }: MetricsDashboardProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -171,6 +297,8 @@ export default function MetricsDashboard({ files }: MetricsDashboardProps) {
   }));
   const maxModuleLoc = Math.max(...metrics.modules.map(m => m.totalLoc), 1);
 
+  const debtDays = (metrics.technicalDebtHours / 8).toFixed(1);
+
   return (
     <div className="w-full">
       {/* Header */}
@@ -188,6 +316,42 @@ export default function MetricsDashboard({ files }: MetricsDashboardProps) {
         >
           {expanded ? "Collapse" : "Details"}
         </button>
+      </div>
+
+      {/* ── Health Score + Breakdown ── */}
+      <div className="p-5 rounded-2xl bg-surface/40 border border-edge mb-6">
+        <div className="flex flex-col sm:flex-row items-center gap-6">
+          {/* Score gauge */}
+          <div className="shrink-0">
+            <ScoreGauge score={metrics.healthScore} />
+          </div>
+          {/* Score breakdown + debt */}
+          <div className="flex-1 w-full space-y-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-faint font-mono mb-2">Score Breakdown</p>
+              <ScoreBreakdown breakdown={metrics.scoreBreakdown} />
+            </div>
+            <div className="flex items-center gap-4 pt-2 border-t border-edge/40">
+              <div>
+                <p className="text-[10px] text-faint font-mono uppercase tracking-wider">Tech Debt</p>
+                <p className="text-lg font-bold font-mono text-coral">{metrics.technicalDebtHours}h</p>
+                <p className="text-[10px] text-faint font-mono">≈ {debtDays} dev-days</p>
+              </div>
+              <div className="border-l border-edge h-12" />
+              <div>
+                <p className="text-[10px] text-faint font-mono uppercase tracking-wider">Complexity</p>
+                <p className="text-lg font-bold font-mono text-gold">{metrics.avgComplexity.toFixed(1)}</p>
+                <p className="text-[10px] text-faint font-mono">{metrics.avgComplexity <= 5 ? "Excellent" : metrics.avgComplexity <= 10 ? "Good" : metrics.avgComplexity <= 15 ? "Fair" : "Poor"}</p>
+              </div>
+              <div className="border-l border-edge h-12" />
+              <div>
+                <p className="text-[10px] text-faint font-mono uppercase tracking-wider">Coupling</p>
+                <p className="text-lg font-bold font-mono text-azure">{(metrics.couplingScore * 100).toFixed(1)}%</p>
+                <p className="text-[10px] text-faint font-mono">{metrics.couplingScore < 0.1 ? "Low" : metrics.couplingScore < 0.2 ? "Medium" : "High"}</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Top-level stats */}
@@ -212,6 +376,14 @@ export default function MetricsDashboard({ files }: MetricsDashboardProps) {
           <BarChart items={moduleBarData} maxValue={maxModuleLoc} />
         </div>
       </div>
+
+      {/* Recommendations — always visible */}
+      {metrics.recommendations.length > 0 && (
+        <div className="p-4 rounded-xl bg-surface/40 border border-edge mb-4">
+          <p className="text-[11px] uppercase tracking-wider text-faint font-mono mb-3">◎ Smart Recommendations</p>
+          <Recommendations recs={metrics.recommendations} />
+        </div>
+      )}
 
       {/* Expanded details */}
       {expanded && (
@@ -305,3 +477,5 @@ export default function MetricsDashboard({ files }: MetricsDashboardProps) {
     </div>
   );
 }
+
+
