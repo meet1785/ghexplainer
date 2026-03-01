@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { computeProjectMetrics, type ProjectMetrics } from "@/lib/metrics";
 
 /**
@@ -273,7 +273,7 @@ function Recommendations({ recs }: { recs: ProjectMetrics["recommendations"] }) 
   );
 }
 
-export default function MetricsDashboard({ files }: MetricsDashboardProps) {
+function MetricsDashboard({ files }: MetricsDashboardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const metrics: ProjectMetrics = useMemo(() => computeProjectMetrics(files), [files]);
@@ -479,3 +479,6 @@ export default function MetricsDashboard({ files }: MetricsDashboardProps) {
 }
 
 
+
+// memoized export to avoid unnecessary rerenders
+export default React.memo(MetricsDashboard);

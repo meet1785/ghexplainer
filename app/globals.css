@@ -58,6 +58,8 @@
 .bg-dots {
   background-image: radial-gradient(circle, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
   background-size: 20px 20px;
+  contain: strict;
+  pointer-events: none;
 }
 
 /* ══════════════════════════════════════════
@@ -110,6 +112,14 @@
   animation: fade-slide-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Reduce CLS by pre-allocating space for above-the-fold content */
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    animation: none;
+  }
+}
+
 .reveal-d1 { animation-delay: 0.1s; }
 .reveal-d2 { animation-delay: 0.2s; }
 .reveal-d3 { animation-delay: 0.3s; }
@@ -121,9 +131,13 @@
 
 .float-blob {
   animation: gradient-drift 20s ease-in-out infinite;
+  will-change: transform;
+  contain: layout style;
 }
 .float-blob-alt {
   animation: gradient-drift 25s ease-in-out infinite reverse;
+  will-change: transform;
+  contain: layout style;
 }
 
 .pulse-gold {

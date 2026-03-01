@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 /**
  * VS Code-style Command Palette (Cmd+K / Ctrl+K)
@@ -118,7 +118,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 // ─── Component ───────────────────────────────────────────────
 
-export default function CommandPalette({ commands }: CommandPaletteProps) {
+function CommandPalette({ commands }: CommandPaletteProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -353,3 +353,5 @@ function HighlightedText({ text, matches, isSelected }: { text: string; matches:
     </span>
   );
 }
+
+export default React.memo(CommandPalette);

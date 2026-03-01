@@ -4,12 +4,13 @@ import { useState, useRef, useCallback, useMemo } from "react";
 import RepoForm from "@/components/RepoForm";
 import type { AnalysisMode } from "@/components/RepoForm";
 import LoadingState from "@/components/LoadingState";
+import Logo from "@/components/Logo";
 import AnalysisOutput from "@/components/AnalysisOutput";
 import HistoryPanel from "@/components/HistoryPanel";
 import DemoShowcase from "@/components/DemoShowcase";
-import Logo from "@/components/Logo";
 import ChatPanel from "@/components/ChatPanel";
-import CommandPalette, { type CommandAction } from "@/components/CommandPalette";
+import CommandPalette from "@/components/CommandPalette";
+import { type CommandAction } from "@/components/CommandPalette";
 import { saveAnalysis, type SavedAnalysis } from "@/lib/history";
 import type { RepoInfo } from "@/lib/github";
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { RepoInfo } from "@/lib/github";
@@ -41,7 +41,7 @@ function phaseLabel(phase: string): string {
   return phase;
 }
 
-export default function AnalysisOutput({
+function AnalysisOutput({
   markdown,
   repoInfo,
   filesAnalyzed,
@@ -339,3 +339,5 @@ function downloadBlob(blob: Blob, filename: string) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+export default AnalysisOutput;

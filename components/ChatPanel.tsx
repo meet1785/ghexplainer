@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -41,7 +41,7 @@ const QUICK_QUESTIONS = [
   "What design patterns are used?",
 ];
 
-export default function ChatPanel({ analysisMarkdown, repoSlug, isOpen, onToggle }: ChatPanelProps) {
+function ChatPanel({ analysisMarkdown, repoSlug, isOpen, onToggle }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -318,3 +318,5 @@ export default function ChatPanel({ analysisMarkdown, repoSlug, isOpen, onToggle
     </div>
   );
 }
+
+export default React.memo(ChatPanel);

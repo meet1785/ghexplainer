@@ -7,17 +7,23 @@ import "./globals.css";
 const syne = Syne({
   variable: "--font-syne",
   subsets: ["latin"],
+  display: "swap",
+  preload: true,
 });
 
 const newsreader = Newsreader({
   variable: "--font-newsreader",
   subsets: ["latin"],
   style: ["normal", "italic"],
+  display: "swap",
+  preload: true,
 });
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
+  display: "swap",
+  preload: true,
 });
 
 export const metadata: Metadata = {
@@ -40,6 +46,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        {/* Preconnect to speed up font fetching */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* Preconnect to GitHub API for faster first analysis */}
+        <link rel="preconnect" href="https://api.github.com" />
+        <meta name="theme-color" content="#08090d" />
+      </head>
       <body
         className={`${syne.variable} ${newsreader.variable} ${jetbrainsMono.variable} font-sans antialiased bg-midnight text-cream`}
       >

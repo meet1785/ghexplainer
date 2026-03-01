@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 
 /**
  * Interactive Force-Directed Dependency Graph
@@ -228,7 +228,7 @@ function simulate(nodes: GraphNode[], edges: GraphEdge[], width: number, height:
 
 // ─── Component ───────────────────────────────────────────────
 
-export default function DependencyGraph({ markdown, filePaths, modules }: DependencyGraphProps) {
+function DependencyGraph({ markdown, filePaths, modules }: DependencyGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 600, height: 400 });
@@ -241,7 +241,7 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const isPanning = useRef(false);
-  const panStart = useRef({ x: 0, y: 0. });
+  const panStart = useRef({ x: 0, y: 0 });
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Build graph data
@@ -615,3 +615,6 @@ export default function DependencyGraph({ markdown, filePaths, modules }: Depend
     </div>
   );
 }
+
+// memoize to avoid re-render when props unchanged
+export default React.memo(DependencyGraph);
