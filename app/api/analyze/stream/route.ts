@@ -17,11 +17,22 @@
 import { NextRequest } from "next/server";
 import { analyzeRepoStream } from "@/lib/analyzer";
 import { parseGitHubUrl } from "@/lib/github";
+import { streamLimiter, getClientIp, rateLimitHeaders } from "@/lib/rate-limit";
 
 export const maxDuration = 300; // 5 minutes for long analyses
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  // Rate limiting — protect expensive Gemini API calls
+  const clientIp = getClientIp(req);
+  const rateResult = streamLimiter.check(clientIp);
+  if (!rateResult.allowed) {
+    return new Response(
+      JSON.stringify({ error: "Too many requests. Please wait before analyzing another repository." }),
+      { status: 429, headers: { "Content-Type": "application/json", ...rateLimitHeaders(rateResult) } }
+    );
+  }
+
   const url = req.nextUrl.searchParams.get("url");
 
   if (!url) {

@@ -7,10 +7,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeRepo } from "@/lib/analyzer";
 import { parseGitHubUrl } from "@/lib/github";
+import { analyzeLimiter, getClientIp, rateLimitHeaders } from "@/lib/rate-limit";
 
 export const maxDuration = 300; // 5 minutes: 3 batches + inter-batch cooldowns + retries
 
 export async function POST(req: NextRequest) {
+  // Rate limiting — protect expensive Gemini API calls
+  const clientIp = getClientIp(req);
+  const rateResult = analyzeLimiter.check(clientIp);
+  if (!rateResult.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please wait before analyzing another repository." },
+      { status: 429, headers: rateLimitHeaders(rateResult) }
+    );
+  }
+
   let url: string;
   try {
     const body = await req.json();

@@ -12,6 +12,7 @@
 
 import { NextRequest } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { chatLimiter, getClientIp, rateLimitHeaders } from "@/lib/rate-limit";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -40,6 +41,16 @@ function collectApiKeys(): string[] {
 }
 
 export async function POST(req: NextRequest) {
+  // Rate limiting — protect Gemini API quota
+  const clientIp = getClientIp(req);
+  const rateResult = chatLimiter.check(clientIp);
+  if (!rateResult.allowed) {
+    return new Response(
+      JSON.stringify({ error: "Too many requests. Please slow down." }),
+      { status: 429, headers: { "Content-Type": "application/json", ...rateLimitHeaders(rateResult) } }
+    );
+  }
+
   let question: string, context: string, repoSlug: string;
 
   try {
