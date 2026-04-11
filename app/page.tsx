@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import RepoForm from "@/components/RepoForm";
 import type { AnalysisMode } from "@/components/RepoForm";
 import LoadingState from "@/components/LoadingState";
@@ -13,6 +13,7 @@ import CommandPalette from "@/components/CommandPalette";
 import { type CommandAction } from "@/components/CommandPalette";
 import { saveAnalysis, type SavedAnalysis } from "@/lib/history";
 import type { RepoInfo } from "@/lib/github";
+import { buildShareUrl, parseRepoFromSearchParams } from "@/lib/share";
 
 type AppState = "idle" | "loading" | "done" | "error";
 
@@ -63,6 +64,20 @@ export default function Home() {
   const [lastMode, setLastMode] = useState<AnalysisMode>("stream");
   const [historyKey, setHistoryKey] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
+
+  /* ── Deep-link: auto-analyze from ?repo= query param on first mount ── */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const repoUrl = parseRepoFromSearchParams(
+      new URLSearchParams(window.location.search)
+    );
+    if (repoUrl) {
+      // Default to stream mode for deep-linked analyses
+      handleAnalyze(repoUrl);
+    }
+    // Only run once on mount — handleAnalyze identity is stable (useCallback)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── Handlers (logic preserved from original) ── */
 
@@ -176,6 +191,10 @@ export default function Home() {
       };
       setResult(analysisData);
       setState("done");
+      // Update the address bar so the current URL is shareable
+      if (typeof window !== "undefined") {
+        window.history.replaceState({}, "", buildShareUrl(url));
+      }
       saveToHistory(analysisData, url);
       setHistoryKey(k => k + 1);
       setTimeout(() => {
@@ -326,6 +345,10 @@ export default function Home() {
                   fileData,
                 };
                 setResult(doneData);
+                // Update the address bar so the current URL is shareable
+                if (typeof window !== "undefined") {
+                  window.history.replaceState({}, "", buildShareUrl(url));
+                }
                 saveToHistory(doneData, url);
                 setHistoryKey(k => k + 1);
               }
@@ -383,6 +406,10 @@ export default function Home() {
     setCurrentStep("");
     setLastUrl("");
     setLastMode("stream");
+    // Clear the ?repo= param so the clean home page URL is shown
+    if (typeof window !== "undefined" && window.location.search) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -465,6 +492,17 @@ export default function Home() {
           icon: "↻",
           action: handleRetry,
         },
+        {
+          id: "copy-share-link",
+          label: "Copy Shareable Link",
+          description: "Copy a direct link to this repository analysis",
+          category: "Share",
+          icon: "🔗",
+          action: () => {
+            const shareUrl = buildShareUrl(lastUrl);
+            navigator.clipboard.writeText(shareUrl);
+          },
+        },
       );
     }
 
@@ -480,7 +518,7 @@ export default function Home() {
     );
 
     return cmds;
-  }, [state, result, chatOpen, handleReset, handleRetry]);
+  }, [state, result, chatOpen, handleReset, handleRetry, lastUrl]);
 
   /* ── Cmd+J shortcut for chat ── */
   // Handled via useEffect

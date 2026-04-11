@@ -20,7 +20,7 @@ export interface CommandAction {
   id: string;
   label: string;
   description?: string;
-  category: "Navigation" | "Export" | "Analysis" | "View" | "Help";
+  category: "Navigation" | "Export" | "Analysis" | "View" | "Help" | "Share";
   shortcut?: string;
   icon: string;
   action: () => void;
