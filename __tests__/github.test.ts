@@ -74,6 +74,11 @@ describe("parseGitHubUrl", () => {
     expect(() => parseGitHubUrl("https://gitlab.com/owner/repo")).toThrow("Invalid GitHub URL");
     expect(() => parseGitHubUrl("not-a-url")).toThrow("Invalid GitHub URL");
     expect(() => parseGitHubUrl("")).toThrow("Invalid GitHub URL");
+    expect(() => parseGitHubUrl("-owner/repo")).toThrow("Invalid GitHub URL");
+    expect(() => parseGitHubUrl("owner/repo!")).toThrow("Invalid GitHub URL");
+    expect(() => parseGitHubUrl("owner-/repo")).toThrow("Invalid GitHub URL");
+    expect(() => parseGitHubUrl("owner/.repo")).toThrow("Invalid GitHub URL");
+    expect(() => parseGitHubUrl(`${"a".repeat(40)}/repo`)).toThrow("Invalid GitHub URL");
   });
 
   it("should throw for URLs missing repo", () => {

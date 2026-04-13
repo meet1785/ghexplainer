@@ -99,14 +99,22 @@ export function parseGitHubUrl(url: string): { owner: string; repo: string } {
     );
   }
 
-  const shorthandMatch = input.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  const shorthandMatch = input.match(/^([^/]+)\/([^/]+)$/);
   if (shorthandMatch) {
-    return { owner: shorthandMatch[1], repo: shorthandMatch[2] };
+    const owner = shorthandMatch[1];
+    const repo = shorthandMatch[2];
+    if (isValidOwnerRepo(owner, repo)) {
+      return { owner, repo };
+    }
   }
 
-  const sshMatch = input.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
-  if (sshMatch) {
-    return { owner: sshMatch[1], repo: sshMatch[2] };
+  const sshPatterns = [
+    /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i,
+    /^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i,
+  ];
+  for (const pattern of sshPatterns) {
+    const parsed = matchAndValidate(input, pattern);
+    if (parsed) return parsed;
   }
 
   let normalized = input;
@@ -129,7 +137,7 @@ export function parseGitHubUrl(url: string): { owner: string; repo: string } {
     const owner = segments[0];
     const repo = segments[1].replace(/\.git$/i, "");
 
-    if (!owner || !repo) {
+    if (!isValidOwnerRepo(owner, repo)) {
       throw new Error("Missing owner or repo");
     }
 
@@ -139,6 +147,33 @@ export function parseGitHubUrl(url: string): { owner: string; repo: string } {
       `Invalid GitHub URL: "${url}". Expected format: https://github.com/owner/repo or owner/repo`
     );
   }
+}
+
+function isValidOwnerRepo(owner: string, repo: string): boolean {
+  return isValidOwner(owner) && isValidRepo(repo);
+}
+
+function isValidOwner(owner: string): boolean {
+  // GitHub owner names: max 39 chars, alphanumeric or single hyphens,
+  // and must start/end with alphanumeric characters.
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner);
+}
+
+function isValidRepo(repo: string): boolean {
+  if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(repo)) return false;
+  if (repo.endsWith(".")) return false;
+  return true;
+}
+
+function matchAndValidate(
+  input: string,
+  pattern: RegExp
+): { owner: string; repo: string } | null {
+  const match = input.match(pattern);
+  if (!match) return null;
+  const owner = match[1];
+  const repo = match[2];
+  return isValidOwnerRepo(owner, repo) ? { owner, repo } : null;
 }
 
 /**
