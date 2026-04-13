@@ -48,6 +48,9 @@ npm run dev
 # Print analysis to stdout
 npm run cli -- https://github.com/pallets/flask
 
+# Owner/repo shorthand also works
+npm run cli -- pallets/flask
+
 # Save to file
 npm run cli -- https://github.com/pallets/flask -o flask-analysis.md
 ```

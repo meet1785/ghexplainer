@@ -34,6 +34,32 @@ describe("parseGitHubUrl", () => {
     expect(result).toEqual({ owner: "pallets", repo: "flask" });
   });
 
+  it("should parse owner/repo shorthand", () => {
+    const result = parseGitHubUrl("pallets/flask");
+    expect(result).toEqual({ owner: "pallets", repo: "flask" });
+  });
+
+  it("should parse SSH URL", () => {
+    const result = parseGitHubUrl("git@github.com:facebook/react.git");
+    expect(result).toEqual({ owner: "facebook", repo: "react" });
+  });
+
+  it("should parse ssh:// URL", () => {
+    const result = parseGitHubUrl("ssh://git@github.com/vercel/next.js");
+    expect(result).toEqual({ owner: "vercel", repo: "next.js" });
+  });
+
+  it("should strip query/hash from URL", () => {
+    expect(parseGitHubUrl("https://github.com/owner/repo?tab=readme-ov-file")).toEqual({
+      owner: "owner",
+      repo: "repo",
+    });
+    expect(parseGitHubUrl("https://github.com/owner/repo#readme")).toEqual({
+      owner: "owner",
+      repo: "repo",
+    });
+  });
+
   it("should handle www prefix", () => {
     const result = parseGitHubUrl("https://www.github.com/owner/repo");
     expect(result).toEqual({ owner: "owner", repo: "repo" });

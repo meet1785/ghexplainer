@@ -41,7 +41,7 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://github.com/owner/repo"
+              placeholder="https://github.com/owner/repo or owner/repo"
               disabled={loading}
               className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-edge bg-surface/80 text-cream placeholder-faint focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold/40 disabled:opacity-50 text-sm font-mono backdrop-blur-sm transition-all duration-300"
             />

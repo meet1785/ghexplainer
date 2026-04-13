@@ -84,19 +84,61 @@ const SKIP_EXACT = new Set([
 
 /**
  * Parse a GitHub URL into { owner, repo }.
- * Supports: https://github.com/owner/repo[.git][/...]
+ * Supports:
+ * - https://github.com/owner/repo[.git][/...]
+ * - github.com/owner/repo
+ * - git@github.com:owner/repo[.git]
+ * - ssh://git@github.com/owner/repo[.git]
+ * - owner/repo
  */
 export function parseGitHubUrl(url: string): { owner: string; repo: string } {
-  const cleaned = url.trim().replace(/\.git$/, "").replace(/\/$/, "");
-  const match = cleaned.match(
-    /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+)/
-  );
-  if (!match) {
+  const input = url.trim();
+  if (!input) {
     throw new Error(
-      `Invalid GitHub URL: "${url}". Expected format: https://github.com/owner/repo`
+      `Invalid GitHub URL: "${url}". Expected format: https://github.com/owner/repo or owner/repo`
     );
   }
-  return { owner: match[1], repo: match[2] };
+
+  const shorthandMatch = input.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  if (shorthandMatch) {
+    return { owner: shorthandMatch[1], repo: shorthandMatch[2] };
+  }
+
+  const sshMatch = input.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+  if (sshMatch) {
+    return { owner: sshMatch[1], repo: sshMatch[2] };
+  }
+
+  let normalized = input;
+  if (/^github\.com\//i.test(normalized)) {
+    normalized = `https://${normalized}`;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase();
+    if (host !== "github.com" && host !== "www.github.com") {
+      throw new Error("Non-GitHub host");
+    }
+
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length < 2) {
+      throw new Error("Missing owner/repo path");
+    }
+
+    const owner = segments[0];
+    const repo = segments[1].replace(/\.git$/i, "");
+
+    if (!owner || !repo) {
+      throw new Error("Missing owner or repo");
+    }
+
+    return { owner, repo };
+  } catch {
+    throw new Error(
+      `Invalid GitHub URL: "${url}". Expected format: https://github.com/owner/repo or owner/repo`
+    );
+  }
 }
 
 /**
