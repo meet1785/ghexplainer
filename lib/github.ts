@@ -84,19 +84,96 @@ const SKIP_EXACT = new Set([
 
 /**
  * Parse a GitHub URL into { owner, repo }.
- * Supports: https://github.com/owner/repo[.git][/...]
+ * Supports:
+ * - https://github.com/owner/repo[.git][/...]
+ * - github.com/owner/repo
+ * - git@github.com:owner/repo[.git]
+ * - ssh://git@github.com/owner/repo[.git]
+ * - owner/repo
  */
 export function parseGitHubUrl(url: string): { owner: string; repo: string } {
-  const cleaned = url.trim().replace(/\.git$/, "").replace(/\/$/, "");
-  const match = cleaned.match(
-    /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+)/
-  );
-  if (!match) {
+  const input = url.trim();
+  if (!input) {
     throw new Error(
-      `Invalid GitHub URL: "${url}". Expected format: https://github.com/owner/repo`
+      `Invalid GitHub URL: "${url}". Expected format: https://github.com/owner/repo or owner/repo`
     );
   }
-  return { owner: match[1], repo: match[2] };
+
+  const shorthandMatch = input.match(/^([^/]+)\/([^/]+)$/);
+  if (shorthandMatch) {
+    const owner = shorthandMatch[1];
+    const repo = shorthandMatch[2];
+    if (isValidOwnerRepo(owner, repo)) {
+      return { owner, repo };
+    }
+  }
+
+  const sshPatterns = [
+    /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i,
+    /^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i,
+  ];
+  for (const pattern of sshPatterns) {
+    const parsed = matchAndValidate(input, pattern);
+    if (parsed) return parsed;
+  }
+
+  let normalized = input;
+  if (/^github\.com\//i.test(normalized)) {
+    normalized = `https://${normalized}`;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase();
+    if (host !== "github.com" && host !== "www.github.com") {
+      throw new Error("Non-GitHub host");
+    }
+
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length < 2) {
+      throw new Error("Missing owner/repo path");
+    }
+
+    const owner = segments[0];
+    const repo = segments[1].replace(/\.git$/i, "");
+
+    if (!isValidOwnerRepo(owner, repo)) {
+      throw new Error("Missing owner or repo");
+    }
+
+    return { owner, repo };
+  } catch {
+    throw new Error(
+      `Invalid GitHub URL: "${url}". Expected format: https://github.com/owner/repo or owner/repo`
+    );
+  }
+}
+
+function isValidOwnerRepo(owner: string, repo: string): boolean {
+  return isValidOwner(owner) && isValidRepo(repo);
+}
+
+function isValidOwner(owner: string): boolean {
+  // GitHub owner names: max 39 chars, alphanumeric or single hyphens,
+  // and must start/end with alphanumeric characters.
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner);
+}
+
+function isValidRepo(repo: string): boolean {
+  if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(repo)) return false;
+  if (repo.endsWith(".")) return false;
+  return true;
+}
+
+function matchAndValidate(
+  input: string,
+  pattern: RegExp
+): { owner: string; repo: string } | null {
+  const match = input.match(pattern);
+  if (!match) return null;
+  const owner = match[1];
+  const repo = match[2];
+  return isValidOwnerRepo(owner, repo) ? { owner, repo } : null;
 }
 
 /**

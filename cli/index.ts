@@ -34,7 +34,7 @@ program
   .name("ghexplainer")
   .description("Deep AI-powered analysis of any public GitHub repository.")
   .version("1.0.0")
-  .argument("<url>", "GitHub repository URL (e.g. https://github.com/owner/repo)")
+  .argument("<url>", "GitHub repository input (e.g. https://github.com/owner/repo or owner/repo)")
   .option("-o, --output <file>", "Save the markdown output to a file")
   .option("--github-token <token>", "GitHub personal access token (increases rate limit)")
   .option("--gemini-key <key>", "Google Gemini API key (overrides GEMINI_API_KEY env var)")
