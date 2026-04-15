@@ -67,22 +67,47 @@ const HEADING_REGEX = /^(#{1,6})\s+(?:(\d+)\.\s+)?(.+)$/;
 
 /**
  * Count words in text, excluding fenced code blocks.
- * Counts sequences of word characters separated by whitespace.
+ * Uses line-based parsing to handle code block boundaries robustly.
  */
 function countWords(text: string): number {
-  // Remove fenced code blocks before counting
-  const withoutCode = text.replace(/```[\s\S]*?```/g, "");
-  const words = withoutCode.match(/\S+/g);
+  // Remove fenced code blocks line-by-line for robustness
+  const lines = text.split("\n");
+  const filteredLines: string[] = [];
+  let inBlock = false;
+  for (const line of lines) {
+    if (/^```/.test(line.trim())) {
+      inBlock = !inBlock;
+      continue;
+    }
+    if (!inBlock) {
+      filteredLines.push(line);
+    }
+  }
+  const words = filteredLines.join("\n").match(/\S+/g);
   return words?.length ?? 0;
 }
 
 /**
  * Count fenced code blocks (``` ... ```) in text.
+ * Tracks open/close state to handle unclosed blocks correctly.
  */
 function countCodeBlocks(text: string): number {
-  const matches = text.match(/```/g);
-  if (!matches) return 0;
-  return Math.floor(matches.length / 2);
+  let count = 0;
+  let inBlock = false;
+  const lines = text.split("\n");
+  for (const line of lines) {
+    if (/^```/.test(line.trim())) {
+      if (inBlock) {
+        // Closing fence
+        count++;
+        inBlock = false;
+      } else {
+        // Opening fence
+        inBlock = true;
+      }
+    }
+  }
+  return count;
 }
 
 /**
