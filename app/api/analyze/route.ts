@@ -1,13 +1,14 @@
 /**
  * POST /api/analyze
  * Body: { url: string }
- * Returns: { markdown, html, repoInfo, filesAnalyzed, chunks, durationMs, cached }
+ * Returns: { markdown, repoInfo, filesAnalyzed, chunks, durationMs, cached, sectionSummary }
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeRepo } from "@/lib/analyzer";
 import { parseGitHubUrl } from "@/lib/github";
 import { analyzeLimiter, getClientIp, rateLimitHeaders } from "@/lib/rate-limit";
+import { parseSections, getSectionSummary } from "@/lib/sections";
 
 export const maxDuration = 300; // 5 minutes: 3 batches + inter-batch cooldowns + retries
 
@@ -53,6 +54,10 @@ export async function POST(req: NextRequest) {
       geminiApiKey: process.env.GEMINI_API_KEY,
     });
 
+    // Parse markdown into structured sections for programmatic access
+    const sections = parseSections(result.markdown);
+    const sectionSummary = getSectionSummary(sections);
+
     return NextResponse.json({
       markdown: result.markdown,
       repoInfo: result.repoInfo,
@@ -60,6 +65,7 @@ export async function POST(req: NextRequest) {
       chunks: result.chunks,
       durationMs: result.durationMs,
       cached: result.cached,
+      sectionSummary,
     });
   } catch (e) {
     const message = (e as Error).message ?? "Unknown error";
