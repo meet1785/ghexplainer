@@ -88,6 +88,11 @@ describe("parseGitHubUrl", () => {
 });
 
 describe("parseGitHubTarget", () => {
+  it("should omit ref when URL does not include one", () => {
+    const result = parseGitHubTarget("https://github.com/owner/repo");
+    expect(result).toEqual({ owner: "owner", repo: "repo" });
+  });
+
   it("should extract ref from tree URLs", () => {
     const result = parseGitHubTarget("https://github.com/owner/repo/tree/develop/src/app");
     expect(result).toEqual({ owner: "owner", repo: "repo", ref: "develop" });

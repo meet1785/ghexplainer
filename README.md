@@ -56,6 +56,16 @@ npm run cli -- pallets/flask
 npm run cli -- https://github.com/pallets/flask -o flask-analysis.md
 ```
 
+### Branch/Tag URL Support
+
+Analyze non-default branches/tags directly with links like:
+
+- `https://github.com/owner/repo/tree/develop`
+- `https://github.com/owner/repo/blob/release-1.2.0/src/index.ts`
+- `https://github.com/owner/repo?ref=feature/my-branch`
+
+![Branch/tag URL support in the input form](public/screenshots/branch-tag-url-support.png)
+
 ## 🏗️ Architecture
 
 ```

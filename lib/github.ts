@@ -144,7 +144,8 @@ export function parseGitHubTarget(url: string): ParsedGitHubTarget {
     const repo = segments[1].replace(/\.git$/i, "");
     const queryRef = parsed.searchParams.get("ref");
     const pathRef = extractRefFromPathSegments(segments);
-    const ref = queryRef?.trim() ? queryRef.trim() : pathRef;
+    const trimmedQueryRef = queryRef?.trim();
+    const ref = trimmedQueryRef ? trimmedQueryRef : pathRef;
 
     if (!isValidOwnerRepo(owner, repo)) {
       throw new Error("Missing owner or repo");
@@ -207,8 +208,16 @@ function isValidGitRef(ref: string): boolean {
   if (ref.startsWith("/") || ref.endsWith("/")) return false;
   if (ref.startsWith(".") || ref.endsWith(".")) return false;
   if (ref.includes("..") || ref.includes("//") || ref.includes("@{")) return false;
-  if (/[\u0000-\u001F\u007F\s~^:?*\[\\]/.test(ref)) return false;
+  if (/[\u0000-\u001F\u007F\s~^:?*[\]\\]/.test(ref)) return false;
   return true;
+}
+
+function encodeRepoPath(path: string): string {
+  return path
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
 
 /**
@@ -220,7 +229,9 @@ export async function fetchRepoInfo(
   token?: string
 ): Promise<RepoInfo> {
   const headers = buildHeaders(token);
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+  const encodedOwner = encodeURIComponent(owner);
+  const encodedRepo = encodeURIComponent(repo);
+  const res = await fetch(`https://api.github.com/repos/${encodedOwner}/${encodedRepo}`, {
     headers,
   });
   if (!res.ok) {
@@ -253,8 +264,10 @@ export async function fetchRepoTree(
   token?: string
 ): Promise<TreeFile[]> {
   const headers = buildHeaders(token);
+  const encodedOwner = encodeURIComponent(owner);
+  const encodedRepo = encodeURIComponent(repo);
   const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    `https://api.github.com/repos/${encodedOwner}/${encodedRepo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
     { headers }
   );
   if (!res.ok) {
@@ -282,8 +295,11 @@ export async function fetchFileContent(
 ): Promise<string> {
   const headers = buildHeaders(token);
   const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+  const encodedOwner = encodeURIComponent(owner);
+  const encodedRepo = encodeURIComponent(repo);
+  const encodedPath = encodeRepoPath(path);
   const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path}${query}`,
+    `https://api.github.com/repos/${encodedOwner}/${encodedRepo}/contents/${encodedPath}${query}`,
     { headers }
   );
   if (!res.ok) return "";

@@ -97,8 +97,9 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
             </button>
           </div>
           <span className="text-[10px] text-faint font-body italic">
-            {mode === "stream" ? "Live progress as modules are analyzed" : "Waits for full result — more reliable for large repos"} · branch/tag URLs supported
+            {mode === "stream" ? "Live progress as modules are analyzed" : "Waits for full result — more reliable for large repos"}
           </span>
+          <span className="text-[10px] text-faint font-body italic">· branch/tag URLs supported</span>
         </div>
 
         {/* Example repos */}

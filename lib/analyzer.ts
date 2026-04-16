@@ -43,6 +43,8 @@ export interface AnalysisOptions {
   noCache?: boolean;
 }
 
+const UNSPECIFIED_REF_CACHE_MARKER = "__unspecified_ref__";
+
 /**
  * Full pipeline: URL → deep repo documentation.
  */
@@ -57,7 +59,7 @@ export async function analyzeRepo(
   // Step 1: Parse URL
   notify("Parsing repository URL…");
   const { owner, repo, ref } = parseGitHubTarget(url);
-  const analysisRef = ref ?? "default";
+  const analysisRef = ref ?? UNSPECIFIED_REF_CACHE_MARKER;
   const cacheKey = `${owner}/${repo}@${analysisRef}`;
 
   // Step 1.5: Check cache
@@ -163,7 +165,7 @@ export async function* analyzeRepoStream(
   // Step 1: Parse URL
   yield { type: "progress", step: "Parsing repository URL…" };
   const { owner, repo, ref } = parseGitHubTarget(url);
-  const analysisRef = ref ?? "default";
+  const analysisRef = ref ?? UNSPECIFIED_REF_CACHE_MARKER;
   const cacheKey = `${owner}/${repo}@${analysisRef}`;
 
   // Check cache
