@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseGitHubUrl, selectReadableFiles, type TreeFile } from "@/lib/github";
+import { parseGitHubTarget, parseGitHubUrl, selectReadableFiles, type TreeFile } from "@/lib/github";
 
 describe("parseGitHubUrl", () => {
   it("should parse standard HTTPS URL", () => {
@@ -84,6 +84,23 @@ describe("parseGitHubUrl", () => {
   it("should throw for URLs missing repo", () => {
     expect(() => parseGitHubUrl("https://github.com/")).toThrow();
     expect(() => parseGitHubUrl("https://github.com/owner-only")).toThrow();
+  });
+});
+
+describe("parseGitHubTarget", () => {
+  it("should extract ref from tree URLs", () => {
+    const result = parseGitHubTarget("https://github.com/owner/repo/tree/develop/src/app");
+    expect(result).toEqual({ owner: "owner", repo: "repo", ref: "develop" });
+  });
+
+  it("should extract ref from blob URLs", () => {
+    const result = parseGitHubTarget("https://github.com/owner/repo/blob/release-1.2.0/README.md");
+    expect(result).toEqual({ owner: "owner", repo: "repo", ref: "release-1.2.0" });
+  });
+
+  it("should use query ref when provided", () => {
+    const result = parseGitHubTarget("https://github.com/owner/repo?ref=feature%2Fbeta");
+    expect(result).toEqual({ owner: "owner", repo: "repo", ref: "feature/beta" });
   });
 });
 

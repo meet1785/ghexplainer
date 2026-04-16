@@ -9,7 +9,7 @@
  */
 
 import {
-  parseGitHubUrl,
+  parseGitHubTarget,
   fetchRepoInfo,
   fetchRepoTree,
   selectReadableFiles,
@@ -56,8 +56,9 @@ export async function analyzeRepo(
 
   // Step 1: Parse URL
   notify("Parsing repository URL…");
-  const { owner, repo } = parseGitHubUrl(url);
-  const cacheKey = `${owner}/${repo}`;
+  const { owner, repo, ref } = parseGitHubTarget(url);
+  const analysisRef = ref ?? "default";
+  const cacheKey = `${owner}/${repo}@${analysisRef}`;
 
   // Step 1.5: Check cache
   if (!noCache) {
@@ -71,13 +72,14 @@ export async function analyzeRepo(
   // Step 2: Fetch repo metadata
   notify(`Fetching metadata for ${owner}/${repo}…`);
   const repoInfo = await fetchRepoInfo(owner, repo, githubToken);
+  const treeRef = ref ?? repoInfo.defaultBranch;
 
   // Step 3: Fetch file tree
-  notify("Fetching file tree…");
+  notify(`Fetching file tree (${treeRef})…`);
   const tree = await fetchRepoTree(
     owner,
     repo,
-    repoInfo.defaultBranch,
+    treeRef,
     githubToken
   );
 
@@ -88,7 +90,8 @@ export async function analyzeRepo(
     owner,
     repo,
     readable,
-    githubToken
+    githubToken,
+    treeRef
   );
 
   // Step 5: Smart Code Chunking
@@ -159,8 +162,9 @@ export async function* analyzeRepoStream(
 
   // Step 1: Parse URL
   yield { type: "progress", step: "Parsing repository URL…" };
-  const { owner, repo } = parseGitHubUrl(url);
-  const cacheKey = `${owner}/${repo}`;
+  const { owner, repo, ref } = parseGitHubTarget(url);
+  const analysisRef = ref ?? "default";
+  const cacheKey = `${owner}/${repo}@${analysisRef}`;
 
   // Check cache
   if (!noCache) {
@@ -175,15 +179,16 @@ export async function* analyzeRepoStream(
   // Step 2: Fetch repo metadata
   yield { type: "progress", step: `Fetching metadata for ${owner}/${repo}…` };
   const repoInfo = await fetchRepoInfo(owner, repo, githubToken);
+  const treeRef = ref ?? repoInfo.defaultBranch;
 
   // Step 3: Fetch file tree
-  yield { type: "progress", step: "Fetching file tree…" };
-  const tree = await fetchRepoTree(owner, repo, repoInfo.defaultBranch, githubToken);
+  yield { type: "progress", step: `Fetching file tree (${treeRef})…` };
+  const tree = await fetchRepoTree(owner, repo, treeRef, githubToken);
 
   // Step 4: Fetch files
   const readable = selectReadableFiles(tree);
   yield { type: "progress", step: `Reading ${readable.length} source files…` };
-  const files: FileContent[] = await fetchSelectedFiles(owner, repo, readable, githubToken);
+  const files: FileContent[] = await fetchSelectedFiles(owner, repo, readable, githubToken, treeRef);
 
   // Step 5: Chunk
   yield { type: "progress", step: "Chunking code by module…" };

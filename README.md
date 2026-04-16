@@ -13,6 +13,7 @@ Paste a GitHub URL → get a structured 11-section analysis covering architectur
 - **Multi-Pass AI** — Per-module analysis → cross-module reasoning → unified synthesis
 - **Markdown Output** — Clean `.md` files ready for docs, notes, or portfolio
 - **Web UI + CLI** — Use the browser interface or the command line
+- **Branch/Tag-Aware URLs** — Analyze `.../tree/<branch>` links and `?ref=<branch|tag>` targets directly
 - **In-Memory Caching** — Repeated analyses are instant (1hr TTL)
 - **Rate Limit Protection** — 3-model fallback chain with exponential backoff
 

@@ -26,6 +26,12 @@ export interface FileContent {
   content: string;
 }
 
+export interface ParsedGitHubTarget {
+  owner: string;
+  repo: string;
+  ref?: string;
+}
+
 // Max characters per file — Gemini 2.5 has 1M token input, so we can afford
 // more per file for better analysis quality
 const MAX_FILE_CHARS = 8000;
@@ -91,7 +97,7 @@ const SKIP_EXACT = new Set([
  * - ssh://git@github.com/owner/repo[.git]
  * - owner/repo
  */
-export function parseGitHubUrl(url: string): { owner: string; repo: string } {
+export function parseGitHubTarget(url: string): ParsedGitHubTarget {
   const input = url.trim();
   if (!input) {
     throw new Error(
@@ -136,17 +142,29 @@ export function parseGitHubUrl(url: string): { owner: string; repo: string } {
 
     const owner = segments[0];
     const repo = segments[1].replace(/\.git$/i, "");
+    const queryRef = parsed.searchParams.get("ref");
+    const pathRef = extractRefFromPathSegments(segments);
+    const ref = queryRef?.trim() ? queryRef.trim() : pathRef;
 
     if (!isValidOwnerRepo(owner, repo)) {
       throw new Error("Missing owner or repo");
     }
 
-    return { owner, repo };
+    if (ref && !isValidGitRef(ref)) {
+      throw new Error("Invalid git ref");
+    }
+
+    return ref ? { owner, repo, ref } : { owner, repo };
   } catch {
     throw new Error(
       `Invalid GitHub URL: "${url}". Expected format: https://github.com/owner/repo or owner/repo`
     );
   }
+}
+
+export function parseGitHubUrl(url: string): { owner: string; repo: string } {
+  const { owner, repo } = parseGitHubTarget(url);
+  return { owner, repo };
 }
 
 function isValidOwnerRepo(owner: string, repo: string): boolean {
@@ -174,6 +192,23 @@ function matchAndValidate(
   const owner = match[1];
   const repo = match[2];
   return isValidOwnerRepo(owner, repo) ? { owner, repo } : null;
+}
+
+function extractRefFromPathSegments(segments: string[]): string | undefined {
+  if (segments.length < 4) return undefined;
+  const view = segments[2]?.toLowerCase();
+  if (view !== "tree" && view !== "blob") return undefined;
+  const maybeRef = segments[3];
+  return maybeRef ? decodeURIComponent(maybeRef) : undefined;
+}
+
+function isValidGitRef(ref: string): boolean {
+  if (!ref) return false;
+  if (ref.startsWith("/") || ref.endsWith("/")) return false;
+  if (ref.startsWith(".") || ref.endsWith(".")) return false;
+  if (ref.includes("..") || ref.includes("//") || ref.includes("@{")) return false;
+  if (/[\u0000-\u001F\u007F\s~^:?*\[\\]/.test(ref)) return false;
+  return true;
 }
 
 /**
@@ -219,7 +254,7 @@ export async function fetchRepoTree(
 ): Promise<TreeFile[]> {
   const headers = buildHeaders(token);
   const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
     { headers }
   );
   if (!res.ok) {
@@ -242,11 +277,13 @@ export async function fetchFileContent(
   owner: string,
   repo: string,
   path: string,
-  token?: string
+  token?: string,
+  ref?: string
 ): Promise<string> {
   const headers = buildHeaders(token);
+  const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
   const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path}${query}`,
     { headers }
   );
   if (!res.ok) return "";
@@ -305,7 +342,8 @@ export async function fetchSelectedFiles(
   owner: string,
   repo: string,
   files: TreeFile[],
-  token?: string
+  token?: string,
+  ref?: string
 ): Promise<FileContent[]> {
   const results: FileContent[] = [];
   let totalChars = 0;
@@ -336,7 +374,7 @@ export async function fetchSelectedFiles(
     const batch = sorted.slice(i, i + BATCH_SIZE);
     const fetched = await Promise.all(
       batch.map(async (file) => {
-        const content = await fetchFileContent(owner, repo, file.path, token);
+        const content = await fetchFileContent(owner, repo, file.path, token, ref);
         return { path: file.path, content };
       })
     );
