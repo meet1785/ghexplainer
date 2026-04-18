@@ -13,6 +13,7 @@ Paste a GitHub URL → get a structured 11-section analysis covering architectur
 - **Multi-Pass AI** — Per-module analysis → cross-module reasoning → unified synthesis
 - **Markdown Output** — Clean `.md` files ready for docs, notes, or portfolio
 - **Web UI + CLI** — Use the browser interface or the command line
+- **Branch/Tag-Aware URLs** — Analyze `.../tree/<branch>` links and `?ref=<branch|tag>` targets directly
 - **In-Memory Caching** — Repeated analyses are instant (1hr TTL)
 - **Rate Limit Protection** — 3-model fallback chain with exponential backoff
 
@@ -54,6 +55,16 @@ npm run cli -- pallets/flask
 # Save to file
 npm run cli -- https://github.com/pallets/flask -o flask-analysis.md
 ```
+
+### Branch/Tag URL Support
+
+Analyze non-default branches/tags directly with links like:
+
+- `https://github.com/owner/repo/tree/develop`
+- `https://github.com/owner/repo/blob/release-1.2.0/src/index.ts`
+- `https://github.com/owner/repo?ref=feature/my-branch`
+
+![Branch/tag URL support in the input form](public/screenshots/branch-tag-url-support.png)
 
 ## 🏗️ Architecture
 
