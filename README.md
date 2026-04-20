@@ -15,6 +15,7 @@ Paste a GitHub URL → get a structured 11-section analysis covering architectur
 - **Web UI + CLI** — Use the browser interface or the command line
 - **Branch/Tag-Aware URLs** — Analyze `.../tree/<branch>` links and `?ref=<branch|tag>` targets directly
 - **In-Memory Caching** — Repeated analyses are instant (1hr TTL)
+- **Fresh Re-Run Control** — Skip cache from Web UI or CLI when you need up-to-date output
 - **Rate Limit Protection** — 3-model fallback chain with exponential backoff
 
 ## 🚀 Quick Start
@@ -54,6 +55,9 @@ npm run cli -- pallets/flask
 
 # Save to file
 npm run cli -- https://github.com/pallets/flask -o flask-analysis.md
+
+# Force a fresh run (skip cache)
+npm run cli -- https://github.com/pallets/flask --no-cache
 ```
 
 ### Branch/Tag URL Support
@@ -133,6 +137,7 @@ Options:
   -o, --output <file>    Save markdown output to a file
   --github-token <token> GitHub personal access token
   --gemini-key <key>     Gemini API key (overrides env)
+  --no-cache             Skip cache and force fresh analysis
   -V, --version          Output version number
   -h, --help             Display help
 ```

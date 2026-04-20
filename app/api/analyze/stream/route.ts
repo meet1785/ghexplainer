@@ -1,5 +1,5 @@
 /**
- * GET /api/analyze/stream?url=<github-url>
+ * GET /api/analyze/stream?url=<github-url>&noCache=<0|1>
  *
  * NDJSON streaming endpoint for long-running analysis.
  * Sends one JSON object per line as events happen, plus heartbeat
@@ -18,6 +18,7 @@ import { NextRequest } from "next/server";
 import { analyzeRepoStream } from "@/lib/analyzer";
 import { parseGitHubUrl } from "@/lib/github";
 import { streamLimiter, getClientIp, rateLimitHeaders } from "@/lib/rate-limit";
+import { parseBooleanFlag } from "@/lib/options";
 
 export const maxDuration = 300; // 5 minutes for long analyses
 export const dynamic = "force-dynamic";
@@ -34,6 +35,7 @@ export async function GET(req: NextRequest) {
   }
 
   const url = req.nextUrl.searchParams.get("url");
+  const noCache = parseBooleanFlag(req.nextUrl.searchParams.get("noCache"));
 
   if (!url) {
     return new Response(
@@ -76,6 +78,7 @@ export async function GET(req: NextRequest) {
         const generator = analyzeRepoStream(url, {
           githubToken: process.env.GITHUB_TOKEN,
           geminiApiKey: process.env.GEMINI_API_KEY,
+          noCache,
         });
 
         for await (const event of generator) {

@@ -62,6 +62,7 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const [lastUrl, setLastUrl] = useState<string>("");
   const [lastMode, setLastMode] = useState<AnalysisMode>("stream");
+  const [lastNoCache, setLastNoCache] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
 
@@ -129,7 +130,7 @@ export default function Home() {
     }, 100);
   }, []);
 
-  const handleAnalyzeComplete = useCallback(async (url: string) => {
+  const handleAnalyzeComplete = useCallback(async (url: string, noCache = false) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -139,6 +140,7 @@ export default function Home() {
     setResult(null);
     setLastUrl(url);
     setLastMode("complete");
+    setLastNoCache(noCache);
 
     const STEP_MESSAGES = [
       "Parsing repository URL…",
@@ -164,7 +166,7 @@ export default function Home() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, noCache }),
         signal: controller.signal,
       });
 
@@ -213,7 +215,7 @@ export default function Home() {
     }
   }, [saveToHistory]);
 
-  const handleAnalyze = useCallback(async (url: string) => {
+  const handleAnalyze = useCallback(async (url: string, noCache = false) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -224,6 +226,7 @@ export default function Home() {
     setCurrentStep("Connecting…");
     setLastUrl(url);
     setLastMode("stream");
+    setLastNoCache(noCache);
 
     let partialMarkdown = "";
     let repoInfo: RepoInfo | null = null;
@@ -238,7 +241,7 @@ export default function Home() {
 
     try {
       const res = await fetch(
-        `/api/analyze/stream?url=${encodeURIComponent(url)}`,
+        `/api/analyze/stream?url=${encodeURIComponent(url)}&noCache=${noCache ? "1" : "0"}`,
         { signal: controller.signal }
       );
 
@@ -406,6 +409,7 @@ export default function Home() {
     setCurrentStep("");
     setLastUrl("");
     setLastMode("stream");
+    setLastNoCache(false);
     // Clear the ?repo= param so the clean home page URL is shown
     if (typeof window !== "undefined" && window.location.search) {
       window.history.replaceState({}, "", window.location.pathname);
@@ -415,14 +419,14 @@ export default function Home() {
 
   const handleRetry = useCallback(() => {
     if (lastUrl) {
-      if (lastMode === "complete") handleAnalyzeComplete(lastUrl);
-      else handleAnalyze(lastUrl);
+      if (lastMode === "complete") handleAnalyzeComplete(lastUrl, lastNoCache);
+      else handleAnalyze(lastUrl, lastNoCache);
     }
-  }, [lastUrl, lastMode, handleAnalyze, handleAnalyzeComplete]);
+  }, [lastUrl, lastMode, lastNoCache, handleAnalyze, handleAnalyzeComplete]);
 
-  const handleSubmit = useCallback((url: string, mode: AnalysisMode) => {
-    if (mode === "complete") handleAnalyzeComplete(url);
-    else handleAnalyze(url);
+  const handleSubmit = useCallback((url: string, mode: AnalysisMode, noCache: boolean) => {
+    if (mode === "complete") handleAnalyzeComplete(url, noCache);
+    else handleAnalyze(url, noCache);
   }, [handleAnalyze, handleAnalyzeComplete]);
 
   /* ── Command Palette actions ── */
