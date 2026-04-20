@@ -5,7 +5,7 @@ import { useState, FormEvent } from "react";
 export type AnalysisMode = "stream" | "complete";
 
 interface RepoFormProps {
-  onSubmit: (url: string, mode: AnalysisMode) => void;
+  onSubmit: (url: string, mode: AnalysisMode, noCache: boolean) => void;
   loading: boolean;
 }
 
@@ -19,11 +19,12 @@ const EXAMPLES = [
 export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
   const [url, setUrl] = useState("");
   const [mode, setMode] = useState<AnalysisMode>("stream");
+  const [noCache, setNoCache] = useState(false);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const trimmed = url.trim();
-    if (trimmed) onSubmit(trimmed, mode);
+    if (trimmed) onSubmit(trimmed, mode, noCache);
   };
 
   return (
@@ -66,7 +67,7 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
         </div>
 
         {/* Mode toggle */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-[11px] text-faint uppercase tracking-[0.15em] font-mono">Mode:</span>
           <div className="flex rounded-lg border border-edge overflow-hidden">
             <button
@@ -100,6 +101,16 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
             {mode === "stream" ? "Live progress as modules are analyzed" : "Waits for full result — more reliable for large repos"}
           </span>
           <span className="text-[10px] text-faint font-body italic">· branch/tag URLs supported</span>
+          <label className="flex items-center gap-2 text-[10px] text-faint font-mono ml-auto">
+            <input
+              type="checkbox"
+              checked={noCache}
+              onChange={(e) => setNoCache(e.target.checked)}
+              disabled={loading}
+              className="w-3.5 h-3.5 accent-gold"
+            />
+            Fresh run (skip cache)
+          </label>
         </div>
 
         {/* Example repos */}

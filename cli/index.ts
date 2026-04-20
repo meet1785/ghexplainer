@@ -38,7 +38,8 @@ program
   .option("-o, --output <file>", "Save the markdown output to a file")
   .option("--github-token <token>", "GitHub personal access token (increases rate limit)")
   .option("--gemini-key <key>", "Google Gemini API key (overrides GEMINI_API_KEY env var)")
-  .action(async (url: string, opts: { output?: string; githubToken?: string; geminiKey?: string }) => {
+  .option("--no-cache", "Bypass in-memory cache and force a fresh analysis")
+  .action(async (url: string, opts: { output?: string; githubToken?: string; geminiKey?: string; noCache?: boolean }) => {
     console.log("\n🔍 ghexplainer — analyzing:", url);
     console.log("─".repeat(60));
 
@@ -46,6 +47,7 @@ program
       const result = await analyzeRepo(url, {
         githubToken: opts.githubToken,
         geminiApiKey: opts.geminiKey,
+        noCache: Boolean(opts.noCache),
         onProgress: (step) => {
           process.stdout.write(`  ⏳ ${step}\n`);
         },

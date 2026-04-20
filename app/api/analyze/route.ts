@@ -1,6 +1,6 @@
 /**
  * POST /api/analyze
- * Body: { url: string }
+ * Body: { url: string, noCache?: boolean }
  * Returns: { markdown, html, repoInfo, filesAnalyzed, chunks, durationMs, cached }
  */
 
@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { analyzeRepo } from "@/lib/analyzer";
 import { parseGitHubUrl } from "@/lib/github";
 import { analyzeLimiter, getClientIp, rateLimitHeaders } from "@/lib/rate-limit";
+import { parseBooleanFlag } from "@/lib/options";
 
 export const maxDuration = 300; // 5 minutes: 3 batches + inter-batch cooldowns + retries
 
@@ -23,9 +24,11 @@ export async function POST(req: NextRequest) {
   }
 
   let url: string;
+  let noCache = false;
   try {
     const body = await req.json();
     url = body?.url;
+    noCache = parseBooleanFlag(body?.noCache);
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -51,6 +54,7 @@ export async function POST(req: NextRequest) {
     const result = await analyzeRepo(url, {
       githubToken: process.env.GITHUB_TOKEN,
       geminiApiKey: process.env.GEMINI_API_KEY,
+      noCache,
     });
 
     return NextResponse.json({
