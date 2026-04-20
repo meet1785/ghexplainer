@@ -70,6 +70,12 @@ Analyze non-default branches/tags directly with links like:
 
 ![Branch/tag URL support in the input form](public/screenshots/branch-tag-url-support.png)
 
+### Fresh Re-Run (Skip Cache)
+
+When you need a guaranteed fresh analysis, enable **Fresh run (skip cache)** in the UI or pass `--no-cache` in CLI mode.
+
+![Fresh run (skip cache) toggle in the input form](https://github.com/user-attachments/assets/010c83da-058c-48b3-af25-4745cf4bd7ae)
+
 ## 🏗️ Architecture
 
 ```
