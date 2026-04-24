@@ -4,12 +4,45 @@
  * Implements the "Output" layer from the architecture:
  * - Markdown (primary, always returned)
  * - HTML Report (rendered from markdown with styling)
+ * - JSON (structured sections for programmatic consumption)
  *
  * Note: PDF generation would require a headless browser or library like
  * puppeteer/jspdf which adds significant bundle size. For now we support
- * Markdown + HTML; PDF can be generated client-side from the HTML via
+ * Markdown + HTML + JSON; PDF can be generated client-side from the HTML via
  * window.print() → "Save as PDF".
  */
+
+import { extractSections, type AnalysisSection } from "./sections";
+
+// ─── JSON Export ─────────────────────────────────────────────
+
+export interface AnalysisJson {
+  /** Repository identifier (e.g. "owner/repo") */
+  repoName: string;
+  /** ISO 8601 timestamp of when this export was created */
+  generatedAt: string;
+  /** Extracted sections in document order */
+  sections: AnalysisSection[];
+}
+
+/**
+ * Convert a markdown analysis document into a structured JSON object.
+ *
+ * The returned object contains the full list of extracted sections so
+ * consumers can process individual parts of the analysis programmatically,
+ * integrate with CI pipelines, or store the result in a database.
+ *
+ * @example
+ *   const json = markdownToJson(markdown, "vercel/next.js");
+ *   console.log(json.sections[0].title); // "Repository Overview"
+ */
+export function markdownToJson(markdown: string, repoName: string): AnalysisJson {
+  return {
+    repoName,
+    generatedAt: new Date().toISOString(),
+    sections: extractSections(markdown),
+  };
+}
 
 /**
  * Convert markdown documentation to a styled standalone HTML report.

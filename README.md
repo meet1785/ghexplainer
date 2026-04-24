@@ -12,6 +12,8 @@ Paste a GitHub URL → get a structured 11-section analysis covering architectur
 - **Smart Code Chunking** — Large repos are split into logical modules with dependency-aware grouping
 - **Multi-Pass AI** — Per-module analysis → cross-module reasoning → unified synthesis
 - **Markdown Output** — Clean `.md` files ready for docs, notes, or portfolio
+- **JSON & HTML Export** — Export the full analysis as structured JSON (for CI/CD pipelines) or standalone HTML
+- **Section Filtering** — Use `--section <n>` in the CLI to extract any of the 11 sections individually
 - **Web UI + CLI** — Use the browser interface or the command line
 - **Branch/Tag-Aware URLs** — Analyze `.../tree/<branch>` links and `?ref=<branch|tag>` targets directly
 - **In-Memory Caching** — Repeated analyses are instant (1hr TTL)
@@ -58,6 +60,18 @@ npm run cli -- https://github.com/pallets/flask -o flask-analysis.md
 
 # Force a fresh run (skip cache)
 npm run cli -- https://github.com/pallets/flask --no-cache
+
+# Export as structured JSON (useful for CI/CD pipelines)
+npm run cli -- pallets/flask --format json -o flask-analysis.json
+
+# Export as standalone HTML report
+npm run cli -- pallets/flask --format html -o flask-report.html
+
+# Print only section 4 (Core Execution Flow)
+npm run cli -- pallets/flask --section 4
+
+# Print section 1 as JSON
+npm run cli -- pallets/flask --section 1 --format json
 ```
 
 ### Branch/Tag URL Support
@@ -140,10 +154,12 @@ Arguments:
   url                    GitHub repository URL
 
 Options:
-  -o, --output <file>    Save markdown output to a file
+  -o, --output <file>    Save output to a file
   --github-token <token> GitHub personal access token
   --gemini-key <key>     Gemini API key (overrides env)
   --no-cache             Skip cache and force fresh analysis
+  --section <number>     Print only a specific section (1-11)
+  --format <format>      Output format: markdown (default), json, html
   -V, --version          Output version number
   -h, --help             Display help
 ```
