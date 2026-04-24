@@ -11,6 +11,10 @@ import { getSection } from "../lib/sections";
 import * as fs from "fs";
 import * as path from "path";
 
+/** Supported CLI output formats. */
+type OutputFormat = "markdown" | "json" | "html";
+const VALID_FORMATS: OutputFormat[] = ["markdown", "json", "html"];
+
 // Load .env.local if running locally (Next.js doesn't auto-load for CLI)
 function loadEnvLocal() {
   const envPath = path.join(process.cwd(), ".env.local");
@@ -65,13 +69,11 @@ program
     }
 
     // Validate --format
-    const validFormats = ["markdown", "json", "html"] as const;
-    type OutputFormat = typeof validFormats[number];
     const format: OutputFormat = (() => {
       if (!opts.format) return "markdown";
       const f = opts.format.toLowerCase() as OutputFormat;
-      if (validFormats.includes(f)) return f;
-      console.error(`❌ --format must be one of: ${validFormats.join(", ")}`);
+      if (VALID_FORMATS.includes(f)) return f;
+      console.error(`❌ --format must be one of: ${VALID_FORMATS.join(", ")}`);
       process.exit(1);
     })();
 

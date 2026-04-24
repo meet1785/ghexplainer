@@ -23,7 +23,7 @@ export interface AnalysisSection {
  * Matches lines of the form: `# 1. Repository Overview`
  * Captured groups: (1) section number, (2) section title
  */
-const SECTION_HEADER_RE = /^#\s+(\d+)\.\s+(.+)$/m;
+const SECTION_HEADER_RE = /^#\s+(\d+)\.\s+(.+)$/;
 
 /**
  * Parse all sections from an analysis markdown document.
