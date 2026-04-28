@@ -109,6 +109,42 @@ export function clearHistory(): void {
 }
 
 /**
+ * Filter a list of analyses by a search query.
+ *
+ * Matching is case-insensitive and checks against:
+ * - repoSlug (owner/repo)
+ * - description
+ * - language
+ *
+ * Returns all analyses when query is empty or whitespace-only.
+ * Pure function — no side effects, easy to test.
+ */
+export function filterHistory(
+  analyses: SavedAnalysis[],
+  query: string
+): SavedAnalysis[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return analyses;
+  return analyses.filter(
+    (h) =>
+      h.repoSlug.toLowerCase().includes(q) ||
+      (h.description?.toLowerCase().includes(q) ?? false) ||
+      (h.language?.toLowerCase().includes(q) ?? false)
+  );
+}
+
+/**
+ * Search saved analyses by a query string.
+ * Convenience wrapper around filterHistory that reads from localStorage.
+ *
+ * Matching is case-insensitive across repoSlug, description, and language.
+ * Returns all history when query is empty or whitespace-only.
+ */
+export function searchHistory(query: string): SavedAnalysis[] {
+  return filterHistory(getHistory(), query);
+}
+
+/**
  * Seed history with hardcoded demo analyses on first visit.
  * Only runs once — sets a flag in localStorage.
  * Uses synchronous import for production reliability.

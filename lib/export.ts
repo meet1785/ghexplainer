@@ -49,9 +49,33 @@ export function markdownToHtml(markdown: string, repoName: string): string {
   // Horizontal rules
   html = html.replace(/^---+$/gm, "<hr>");
 
-  // Unordered lists
-  html = html.replace(/^[-*]\s+(.*)$/gm, "<li>$1</li>");
-  html = html.replace(/(<li>[\s\S]*?<\/li>)(\n(?!<li>))/g, "<ul>$1</ul>$2");
+  // Unordered and ordered lists — processed line-by-line for correct <ul>/<ol> wrapping
+  {
+    const lines = html.split("\n");
+    const out: string[] = [];
+    let inUl = false;
+    let inOl = false;
+    for (const line of lines) {
+      const ulMatch = line.match(/^[-*]\s+(.*)$/);
+      const olMatch = line.match(/^(\d+)\.\s+(.*)$/);
+      if (ulMatch) {
+        if (inOl) { out.push("</ol>"); inOl = false; }
+        if (!inUl) { out.push("<ul>"); inUl = true; }
+        out.push(`<li>${ulMatch[1]}</li>`);
+      } else if (olMatch) {
+        if (inUl) { out.push("</ul>"); inUl = false; }
+        if (!inOl) { out.push("<ol>"); inOl = true; }
+        out.push(`<li>${olMatch[2]}</li>`);
+      } else {
+        if (inUl) { out.push("</ul>"); inUl = false; }
+        if (inOl) { out.push("</ol>"); inOl = false; }
+        out.push(line);
+      }
+    }
+    if (inUl) out.push("</ul>");
+    if (inOl) out.push("</ol>");
+    html = out.join("\n");
+  }
 
   // Links
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');

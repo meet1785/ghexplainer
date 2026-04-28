@@ -58,10 +58,43 @@ describe("markdownToHtml", () => {
     expect(html).toContain("<hr>");
   });
 
-  it("should convert unordered lists", () => {
+  it("should convert unordered lists with - marker", () => {
     const html = markdownToHtml("- Item one\n- Item two", "repo");
     expect(html).toContain("<li>Item one</li>");
     expect(html).toContain("<li>Item two</li>");
+    expect(html).toContain("<ul>");
+    expect(html).toContain("</ul>");
+  });
+
+  it("should convert unordered lists with * marker", () => {
+    const html = markdownToHtml("* Alpha\n* Beta", "repo");
+    expect(html).toContain("<li>Alpha</li>");
+    expect(html).toContain("<li>Beta</li>");
+    expect(html).toContain("<ul>");
+  });
+
+  it("should convert ordered lists", () => {
+    const html = markdownToHtml("1. First step\n2. Second step\n3. Third step", "repo");
+    expect(html).toContain("<li>First step</li>");
+    expect(html).toContain("<li>Second step</li>");
+    expect(html).toContain("<li>Third step</li>");
+    expect(html).toContain("<ol>");
+    expect(html).toContain("</ol>");
+  });
+
+  it("should wrap ordered list items in <ol> not <ul>", () => {
+    const html = markdownToHtml("1. Alpha\n2. Beta", "repo");
+    expect(html).toContain("<ol>");
+    expect(html).not.toContain("<ul>");
+  });
+
+  it("should handle mixed unordered and ordered lists", () => {
+    const md = "- Bullet one\n- Bullet two\n1. Step one\n2. Step two";
+    const html = markdownToHtml(md, "repo");
+    expect(html).toContain("<ul>");
+    expect(html).toContain("<ol>");
+    expect(html).toContain("<li>Bullet one</li>");
+    expect(html).toContain("<li>Step one</li>");
   });
 
   it("should include dark theme styling", () => {
