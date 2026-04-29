@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { markdownToHtml } from "@/lib/export";
+import { markdownToHtml, escapeHtml } from "@/lib/export";
 
 describe("markdownToHtml", () => {
   it("should produce a complete HTML document", () => {
@@ -74,5 +74,69 @@ describe("markdownToHtml", () => {
     const html = markdownToHtml("", "repo");
     expect(html).toContain("<!DOCTYPE html>");
     expect(html).toContain("<title>repo — ghexplainer Analysis</title>");
+  });
+});
+
+// ─── escapeHtml ───────────────────────────────────────────────
+
+describe("escapeHtml", () => {
+  it("should escape ampersands", () => {
+    expect(escapeHtml("foo & bar")).toBe("foo &amp; bar");
+  });
+
+  it("should escape less-than characters", () => {
+    expect(escapeHtml("<div>")).toBe("&lt;div&gt;");
+  });
+
+  it("should escape greater-than characters", () => {
+    expect(escapeHtml("a > b")).toBe("a &gt; b");
+  });
+
+  it("should escape double quotes", () => {
+    expect(escapeHtml('say "hello"')).toBe("say &quot;hello&quot;");
+  });
+
+  it("should escape single quotes", () => {
+    expect(escapeHtml("it's")).toBe("it&#39;s");
+  });
+
+  it("should escape a script injection attempt", () => {
+    const malicious = '<script>alert("xss")</script>';
+    const escaped = escapeHtml(malicious);
+    expect(escaped).not.toContain("<script>");
+    expect(escaped).not.toContain("</script>");
+    expect(escaped).toContain("&lt;script&gt;");
+  });
+
+  it("should return an empty string unchanged", () => {
+    expect(escapeHtml("")).toBe("");
+  });
+
+  it("should leave plain text unchanged", () => {
+    expect(escapeHtml("Hello World 123")).toBe("Hello World 123");
+  });
+});
+
+// ─── markdownToHtml XSS protection ───────────────────────────
+
+describe("markdownToHtml XSS protection", () => {
+  it("should escape < and > in repoName in the title", () => {
+    const html = markdownToHtml("# Hello", '<script>alert("xss")</script>');
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("should escape double quotes in repoName in the title", () => {
+    const html = markdownToHtml("# Hello", '"quoted"');
+    const titleMatch = html.match(/<title>(.*?)<\/title>/);
+    expect(titleMatch?.[1]).not.toContain('"quoted"');
+    expect(titleMatch?.[1]).toContain("&quot;quoted&quot;");
+  });
+
+  it("should escape HTML in repoName in the header paragraph", () => {
+    const html = markdownToHtml("# Hello", "<b>bold</b>");
+    // The header p tag should not render unescaped HTML
+    expect(html).not.toContain("<strong><b>bold</b></strong>");
+    expect(html).toContain("&lt;b&gt;bold&lt;/b&gt;");
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FormEvent } from "react";
+import { validateGitHubUrl } from "@/lib/github";
 
 export type AnalysisMode = "stream" | "complete";
 
@@ -20,11 +21,28 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
   const [url, setUrl] = useState("");
   const [mode, setMode] = useState<AnalysisMode>("stream");
   const [noCache, setNoCache] = useState(false);
+  const [validationError, setValidationError] = useState<string>("");
+
+  const handleUrlChange = (value: string) => {
+    setUrl(value);
+    if (validationError && value.trim()) {
+      // Clear error as user types, but only re-validate if there was a prior error
+      const result = validateGitHubUrl(value);
+      if (result.valid) setValidationError("");
+    }
+  };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const trimmed = url.trim();
-    if (trimmed) onSubmit(trimmed, mode, noCache);
+    if (!trimmed) return;
+    const result = validateGitHubUrl(trimmed);
+    if (!result.valid) {
+      setValidationError(result.error);
+      return;
+    }
+    setValidationError("");
+    onSubmit(trimmed, mode, noCache);
   };
 
   return (
@@ -41,10 +59,16 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
             <input
               type="text"
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => handleUrlChange(e.target.value)}
               placeholder="https://github.com/owner/repo (or /tree/branch) or owner/repo"
               disabled={loading}
-              className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-edge bg-surface/80 text-cream placeholder-faint focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold/40 disabled:opacity-50 text-sm font-mono backdrop-blur-sm transition-all duration-300"
+              aria-invalid={!!validationError}
+              aria-describedby={validationError ? "repo-url-error" : undefined}
+              className={`w-full pl-11 pr-4 py-3.5 rounded-xl border bg-surface/80 text-cream placeholder-faint focus:outline-none focus:ring-2 disabled:opacity-50 text-sm font-mono backdrop-blur-sm transition-all duration-300 ${
+                validationError
+                  ? "border-coral/60 focus:ring-coral/30 focus:border-coral/40"
+                  : "border-edge focus:ring-gold/30 focus:border-gold/40"
+              }`}
             />
           </div>
           <button
@@ -65,6 +89,14 @@ export default function RepoForm({ onSubmit, loading }: RepoFormProps) {
             )}
           </button>
         </div>
+
+        {/* Validation error */}
+        {validationError && (
+          <p id="repo-url-error" role="alert" className="text-xs text-coral font-mono -mt-1 flex items-center gap-1.5">
+            <span>⚠</span>
+            <span>{validationError}</span>
+          </p>
+        )}
 
         {/* Mode toggle */}
         <div className="flex flex-wrap items-center gap-3">

@@ -8,6 +8,7 @@ import DependencyGraph from "./DependencyGraph";
 import MetricsDashboard from "./MetricsDashboard";
 import TableOfContents from "./TableOfContents";
 import { computeProjectMetrics } from "@/lib/metrics";
+import { formatDuration } from "@/lib/format";
 
 interface AnalysisOutputProps {
   markdown: string;
@@ -136,7 +137,7 @@ function AnalysisOutput({
             {repoInfo.language && <span>· {repoInfo.language}</span>}
             <span>· {filesAnalyzed} files</span>
             <span>· {chunks} chunks</span>
-            {durationMs > 0 && <span>· {(durationMs / 1000).toFixed(1)}s</span>}
+            {durationMs > 0 && <span>· {formatDuration(durationMs)}</span>}
             {healthScore !== null && (
               <span
                 className="px-2 py-0.5 rounded font-mono text-[10px] font-semibold"
