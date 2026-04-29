@@ -45,8 +45,8 @@ describe("formatDuration", () => {
     expect(formatDuration(7_200_000)).toBe("2h");
   });
 
-  it("should return '—' for zero milliseconds", () => {
-    // 0ms rounds to 0.0s
+  it("should format zero milliseconds as 0.0s", () => {
+    // 0ms rounds to 0.0s (not treated as an error/invalid value)
     expect(formatDuration(0)).toBe("0.0s");
   });
 

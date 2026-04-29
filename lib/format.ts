@@ -34,6 +34,8 @@ export function formatDuration(ms: number): string {
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
+const BYTES_PER_KB = 1024;
+
 /**
  * Format a byte count into a compact human-readable string.
  *
@@ -44,10 +46,10 @@ export function formatDuration(ms: number): string {
  */
 export function formatBytes(bytes: number): string {
   if (!isFinite(bytes) || bytes < 0) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (bytes < BYTES_PER_KB) return `${bytes} B`;
+  if (bytes < BYTES_PER_KB * BYTES_PER_KB) return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`;
+  if (bytes < BYTES_PER_KB * BYTES_PER_KB * BYTES_PER_KB) return `${(bytes / (BYTES_PER_KB * BYTES_PER_KB)).toFixed(1)} MB`;
+  return `${(bytes / (BYTES_PER_KB * BYTES_PER_KB * BYTES_PER_KB)).toFixed(1)} GB`;
 }
 
 /**
