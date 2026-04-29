@@ -89,6 +89,37 @@ const SKIP_EXACT = new Set([
 ]);
 
 /**
+ * Validate a GitHub URL/shorthand without throwing.
+ * Returns { valid: true } on success, or { valid: false, error: string } on failure.
+ *
+ * Useful for client-side form validation before submitting to the API.
+ *
+ * @example
+ *   validateGitHubUrl("https://github.com/owner/repo")
+ *   // → { valid: true }
+ *
+ *   validateGitHubUrl("not-a-url")
+ *   // → { valid: false, error: "Invalid GitHub URL: ..." }
+ */
+export function validateGitHubUrl(url: string): { valid: true } | { valid: false; error: string } {
+  if (!url || !url.trim()) {
+    return { valid: false, error: "Please enter a GitHub repository URL or owner/repo." };
+  }
+  if (url.trim().length > 500) {
+    return { valid: false, error: "URL is too long. Please enter a valid GitHub repository URL." };
+  }
+  try {
+    parseGitHubTarget(url);
+    return { valid: true };
+  } catch (err) {
+    return {
+      valid: false,
+      error: (err as Error).message ?? "Invalid GitHub URL.",
+    };
+  }
+}
+
+/**
  * Parse a GitHub URL into { owner, repo }.
  * Supports:
  * - https://github.com/owner/repo[.git][/...]

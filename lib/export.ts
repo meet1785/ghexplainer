@@ -12,6 +12,23 @@
  */
 
 /**
+ * Escape special HTML characters in a string to prevent XSS injection.
+ * Applied to any user-supplied or repo-derived text before insertion into HTML.
+ *
+ * @example
+ *   escapeHtml('<script>alert("xss")</script>')
+ *   // → '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
+ */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * Convert markdown documentation to a styled standalone HTML report.
  */
 export function markdownToHtml(markdown: string, repoName: string): string {
@@ -80,7 +97,7 @@ export function markdownToHtml(markdown: string, repoName: string): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${repoName} — ghexplainer Analysis</title>
+  <title>${escapeHtml(repoName)} — ghexplainer Analysis</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -161,7 +178,7 @@ export function markdownToHtml(markdown: string, repoName: string): string {
 <body>
   <div class="header">
     <h1>🔍 ghexplainer</h1>
-    <p>Technical Analysis Report — <strong>${repoName}</strong></p>
+    <p>Technical Analysis Report — <strong>${escapeHtml(repoName)}</strong></p>
     <p>Generated ${new Date().toISOString().split("T")[0]}</p>
   </div>
   ${html}

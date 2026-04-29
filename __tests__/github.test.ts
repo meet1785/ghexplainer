@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseGitHubTarget, parseGitHubUrl, selectReadableFiles, type TreeFile } from "@/lib/github";
+import { parseGitHubTarget, parseGitHubUrl, selectReadableFiles, validateGitHubUrl, type TreeFile } from "@/lib/github";
 
 describe("parseGitHubUrl", () => {
   it("should parse standard HTTPS URL", () => {
@@ -213,5 +213,80 @@ describe("selectReadableFiles", () => {
     const tree = makeTree(["app/globals.css", "templates/index.html", "src/app.ts"]);
     const selected = selectReadableFiles(tree);
     expect(selected.length).toBe(3);
+  });
+});
+
+// ─── validateGitHubUrl ────────────────────────────────────────
+
+describe("validateGitHubUrl", () => {
+  it("should return valid for a standard HTTPS URL", () => {
+    const result = validateGitHubUrl("https://github.com/owner/repo");
+    expect(result.valid).toBe(true);
+  });
+
+  it("should return valid for an owner/repo shorthand", () => {
+    const result = validateGitHubUrl("pallets/flask");
+    expect(result.valid).toBe(true);
+  });
+
+  it("should return valid for a URL with a branch ref", () => {
+    const result = validateGitHubUrl("https://github.com/vercel/next.js/tree/canary");
+    expect(result.valid).toBe(true);
+  });
+
+  it("should return valid for a SSH URL", () => {
+    const result = validateGitHubUrl("git@github.com:facebook/react.git");
+    expect(result.valid).toBe(true);
+  });
+
+  it("should return invalid for an empty string", () => {
+    const result = validateGitHubUrl("");
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toBeTruthy();
+    }
+  });
+
+  it("should return invalid for a whitespace-only string", () => {
+    const result = validateGitHubUrl("   ");
+    expect(result.valid).toBe(false);
+  });
+
+  it("should return invalid for a non-GitHub URL", () => {
+    const result = validateGitHubUrl("https://gitlab.com/owner/repo");
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toBeTruthy();
+    }
+  });
+
+  it("should return invalid for a URL that is too long", () => {
+    const longUrl = "https://github.com/owner/" + "a".repeat(500);
+    const result = validateGitHubUrl(longUrl);
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain("too long");
+    }
+  });
+
+  it("should return invalid for a plain random string", () => {
+    const result = validateGitHubUrl("not-a-valid-url-at-all");
+    expect(result.valid).toBe(false);
+  });
+
+  it("should return an error message string when invalid", () => {
+    const result = validateGitHubUrl("https://example.com/foo");
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(typeof result.error).toBe("string");
+      expect(result.error.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("should not throw for any string input", () => {
+    const inputs = ["", " ", "null", "undefined", "http://", "://", "\n", "a/b/c/d"];
+    for (const input of inputs) {
+      expect(() => validateGitHubUrl(input)).not.toThrow();
+    }
   });
 });
