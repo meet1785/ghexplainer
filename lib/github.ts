@@ -32,6 +32,31 @@ export interface ParsedGitHubTarget {
   ref?: string;
 }
 
+// ─── PR-related types ─────────────────────────────────────────
+
+export interface PRInfo {
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed" | "merged";
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  user: string;
+  createdAt: string;
+  mergedAt: string | null;
+  headRef: string;
+  baseRef: string;
+}
+
+export interface PRFile {
+  filename: string;
+  status: "added" | "modified" | "removed" | "renamed" | "copied" | "changed" | "unchanged";
+  additions: number;
+  deletions: number;
+  patch?: string;
+}
+
 // Max characters per file — Gemini 2.5 has 1M token input, so we can afford
 // more per file for better analysis quality
 const MAX_FILE_CHARS = 8000;
@@ -455,4 +480,74 @@ function buildHeaders(token?: string): Record<string, string> {
   const t = token ?? process.env.GITHUB_TOKEN;
   if (t) headers["Authorization"] = `Bearer ${t}`;
   return headers;
+}
+
+// ─── PR API functions ─────────────────────────────────────────
+
+/**
+ * Fetch metadata for a specific pull request.
+ */
+export async function fetchPRInfo(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  token?: string
+): Promise<PRInfo> {
+  const headers = buildHeaders(token);
+  const encodedOwner = encodeURIComponent(owner);
+  const encodedRepo = encodeURIComponent(repo);
+  const res = await fetch(
+    `https://api.github.com/repos/${encodedOwner}/${encodedRepo}/pulls/${prNumber}`,
+    { headers }
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`GitHub PR API error ${res.status} for PR #${prNumber}: ${body}`);
+  }
+  const data = await res.json();
+  return {
+    number: data.number,
+    title: data.title ?? "",
+    body: data.body ?? "",
+    state: data.merged_at ? "merged" : (data.state as "open" | "closed"),
+    additions: data.additions ?? 0,
+    deletions: data.deletions ?? 0,
+    changedFiles: data.changed_files ?? 0,
+    user: data.user?.login ?? "",
+    createdAt: data.created_at ?? "",
+    mergedAt: data.merged_at ?? null,
+    headRef: data.head?.ref ?? "",
+    baseRef: data.base?.ref ?? "",
+  };
+}
+
+/**
+ * Fetch the list of files changed in a pull request (up to 100 files).
+ * Each file includes its status, line diff counts, and optional patch text.
+ */
+export async function fetchPRFiles(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  token?: string
+): Promise<PRFile[]> {
+  const headers = buildHeaders(token);
+  const encodedOwner = encodeURIComponent(owner);
+  const encodedRepo = encodeURIComponent(repo);
+  const res = await fetch(
+    `https://api.github.com/repos/${encodedOwner}/${encodedRepo}/pulls/${prNumber}/files?per_page=100`,
+    { headers }
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`GitHub PR files API error ${res.status} for PR #${prNumber}: ${body}`);
+  }
+  const data = await res.json();
+  return (data as Record<string, unknown>[]).map((f) => ({
+    filename: f.filename as string,
+    status: f.status as PRFile["status"],
+    additions: (f.additions as number) ?? 0,
+    deletions: (f.deletions as number) ?? 0,
+    patch: f.patch as string | undefined,
+  }));
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { RepoInfo } from "@/lib/github";
@@ -9,6 +9,7 @@ import MetricsDashboard from "./MetricsDashboard";
 import TableOfContents from "./TableOfContents";
 import { computeProjectMetrics } from "@/lib/metrics";
 import { formatDuration } from "@/lib/format";
+import { searchSections, countTotalMatches } from "@/lib/search";
 
 interface AnalysisOutputProps {
   markdown: string;
@@ -59,6 +60,10 @@ function AnalysisOutput({
 }: AnalysisOutputProps) {
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<"report" | "metrics" | "graph">("report");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocusIdx, setSearchFocusIdx] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = !complete && phase !== "complete";
   const articleRef = useRef<HTMLElement>(null);
 
@@ -67,6 +72,52 @@ function AnalysisOutput({
     if (!fileData || fileData.length === 0) return null;
     return computeProjectMetrics(fileData).healthScore;
   }, [fileData]);
+
+  // Search results
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return searchSections(markdown, searchQuery);
+  }, [markdown, searchQuery]);
+
+  const totalMatches = useMemo(() => {
+    if (!searchQuery.trim()) return 0;
+    return countTotalMatches(markdown, searchQuery);
+  }, [markdown, searchQuery]);
+
+  // Open search bar on Cmd+F / Ctrl+F
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f" && activeTab === "report") {
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+      }
+      if (e.key === "Escape" && searchOpen) {
+        setSearchOpen(false);
+        setSearchQuery("");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTab, searchOpen]);
+
+  // Navigate to a search result by scrolling to its heading.
+  // react-markdown renders headings with id attributes that match the anchor slug,
+  // so document.getElementById should always find the element.  The heading text
+  // fallback handles edge cases where the id was not generated (e.g. during streaming).
+  const jumpToResult = useCallback((anchor: string, heading: string) => {
+    const byId = document.getElementById(anchor);
+    if (byId) {
+      byId.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    // Fallback: locate by exact heading text match within the article only
+    if (articleRef.current) {
+      const h = Array.from(articleRef.current.querySelectorAll("h1,h2,h3,h4,h5,h6"))
+        .find((el) => el.textContent?.trim() === heading);
+      h?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, []);
 
   const handleCopyMarkdown = async () => {
     await navigator.clipboard.writeText(markdown);
@@ -181,29 +232,118 @@ function AnalysisOutput({
         </div>
 
         {/* View tabs — Report / Metrics / Graph */}
-        <div className="max-w-5xl mx-auto px-6 flex items-center gap-0 border-t border-edge/40">
-          {[
-            { id: "report" as const, label: "Report", icon: "◆" },
-            { id: "metrics" as const, label: "Metrics", icon: "▣", disabled: !fileData?.length },
-            { id: "graph" as const, label: "Graph", icon: "◈", disabled: !filePaths?.length && !moduleChunks?.length },
-          ].map((tab) => (
+        <div className="max-w-5xl mx-auto px-6 flex items-center justify-between border-t border-edge/40">
+          <div className="flex items-center gap-0">
+            {[
+              { id: "report" as const, label: "Report", icon: "◆" },
+              { id: "metrics" as const, label: "Metrics", icon: "▣", disabled: !fileData?.length },
+              { id: "graph" as const, label: "Graph", icon: "◈", disabled: !filePaths?.length && !moduleChunks?.length },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => !tab.disabled && setActiveTab(tab.id)}
+                disabled={tab.disabled}
+                className={`flex items-center gap-1.5 px-4 py-2 text-xs font-mono transition-all duration-200 border-b-2 ${
+                  activeTab === tab.id
+                    ? "text-gold border-gold"
+                    : tab.disabled
+                    ? "text-faint/30 border-transparent cursor-not-allowed"
+                    : "text-faint hover:text-cream border-transparent hover:border-edge"
+                }`}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+          {/* Search toggle — only visible on report tab */}
+          {activeTab === "report" && (
             <button
-              key={tab.id}
-              onClick={() => !tab.disabled && setActiveTab(tab.id)}
-              disabled={tab.disabled}
-              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-mono transition-all duration-200 border-b-2 ${
-                activeTab === tab.id
-                  ? "text-gold border-gold"
-                  : tab.disabled
-                  ? "text-faint/30 border-transparent cursor-not-allowed"
-                  : "text-faint hover:text-cream border-transparent hover:border-edge"
+              onClick={() => {
+                setSearchOpen((o) => !o);
+                setSearchQuery("");
+                setSearchFocusIdx(0);
+                setTimeout(() => searchInputRef.current?.focus(), 50);
+              }}
+              title="Search report (Ctrl+F)"
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-mono transition-all duration-200 ${
+                searchOpen
+                  ? "text-gold bg-gold/10 border border-gold/30"
+                  : "text-faint hover:text-cream"
               }`}
             >
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+              </svg>
+              <span>Search</span>
             </button>
-          ))}
+          )}
         </div>
+
+        {/* Inline search panel */}
+        {searchOpen && activeTab === "report" && (
+          <div className="max-w-5xl mx-auto px-6 py-3 border-t border-edge/30 bg-midnight/60">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface border border-edge focus-within:border-gold/50 transition-colors">
+                <svg className="w-3.5 h-3.5 text-faint shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+                </svg>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setSearchFocusIdx(0); }}
+                  placeholder="Search in report…"
+                  className="flex-1 bg-transparent text-sm text-cream placeholder-faint outline-none font-mono"
+                />
+                {searchQuery && (
+                  <span className="text-[11px] font-mono text-faint shrink-0">
+                    {totalMatches} match{totalMatches !== 1 ? "es" : ""}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+                className="text-faint hover:text-coral transition-colors p-1"
+                title="Close search (Esc)"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Search results list */}
+            {searchQuery.trim() && searchResults.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1 max-h-52 overflow-y-auto">
+                {searchResults.map((result, i) => (
+                  <button
+                    key={result.anchor + i}
+                    onClick={() => { jumpToResult(result.anchor, result.heading); setSearchFocusIdx(i); }}
+                    className={`text-left px-3 py-2 rounded-lg transition-colors duration-150 border ${
+                      searchFocusIdx === i
+                        ? "bg-gold/10 border-gold/30 text-cream"
+                        : "bg-surface/50 border-edge/40 text-dust hover:bg-surface hover:text-cream hover:border-edge"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-faint shrink-0">H{result.level}</span>
+                      <span className="text-xs font-semibold font-mono truncate">{result.heading}</span>
+                      <span className="ml-auto text-[10px] font-mono text-faint shrink-0">{result.score} hit{result.score !== 1 ? "s" : ""}</span>
+                    </div>
+                    {result.snippet && (
+                      <p className="mt-0.5 text-[11px] text-faint line-clamp-1 font-body">{result.snippet}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {searchQuery.trim() && searchResults.length === 0 && (
+              <p className="mt-2 text-xs text-faint font-mono">No sections match &ldquo;{searchQuery}&rdquo;</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Meta card */}

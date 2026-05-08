@@ -1,11 +1,34 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getHistory, deleteAnalysis, clearHistory, seedHistoryIfEmpty, type SavedAnalysis } from "@/lib/history";
+import {
+  getHistory,
+  deleteAnalysis,
+  clearHistory,
+  seedHistoryIfEmpty,
+  togglePinAnalysis,
+  type SavedAnalysis,
+} from "@/lib/history";
 
 interface HistoryPanelProps {
   onLoad: (entry: SavedAnalysis) => void;
   refreshKey?: number;
+}
+
+/** Pin / tack icon used both as an indicator badge and as an action button. */
+function PinIcon({ filled, className }: { filled: boolean; className?: string }) {
+  return (
+    <svg
+      className={className ?? "w-3.5 h-3.5"}
+      fill={filled ? "currentColor" : "none"}
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={filled ? 0 : 2}
+      aria-hidden="true"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+    </svg>
+  );
 }
 
 export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelProps) {
@@ -56,7 +79,11 @@ export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelPro
         {displayList.map((entry) => (
           <div
             key={entry.id}
-            className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-surface/50 border border-edge/60 hover:border-gold/30 transition-all duration-300 group"
+            className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl border transition-all duration-300 group ${
+              entry.pinned
+                ? "bg-gold/5 border-gold/20 hover:border-gold/40"
+                : "bg-surface/50 border-edge/60 hover:border-gold/30"
+            }`}
           >
             <button
               onClick={() => onLoad(entry)}
@@ -64,6 +91,11 @@ export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelPro
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
+                  {entry.pinned && (
+                    <span className="text-gold/80 shrink-0" title="Pinned">
+                      <PinIcon filled className="w-3 h-3" />
+                    </span>
+                  )}
                   <span className="font-mono text-sm font-medium text-cream-dim truncate group-hover:text-cream transition-colors">
                     {entry.repoSlug}
                   </span>
@@ -90,6 +122,22 @@ export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelPro
               <span className="text-faint group-hover:text-gold transition-colors shrink-0 text-xs font-mono">
                 View →
               </span>
+            </button>
+            {/* Pin / unpin */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePinAnalysis(entry.id);
+                setHistory(getHistory());
+              }}
+              className={`transition-colors shrink-0 p-1 ${
+                entry.pinned
+                  ? "text-gold hover:text-gold/60"
+                  : "text-faint hover:text-gold"
+              }`}
+              title={entry.pinned ? "Unpin" : "Pin to top"}
+            >
+              <PinIcon filled={!!entry.pinned} />
             </button>
             <button
               onClick={(e) => {
