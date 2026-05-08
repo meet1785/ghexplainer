@@ -30,13 +30,15 @@ export interface SavedAnalysis {
   durationMs: number;
   /** ISO timestamp */
   savedAt: string;
+  /** Whether the entry is pinned — pinned entries always appear first and are never auto-evicted */
+  pinned?: boolean;
 }
 
 const STORAGE_KEY = "ghexplainer_history";
 const MAX_ENTRIES = 20;
 
 /**
- * Get all saved analyses, newest first.
+ * Get all saved analyses, pinned entries first, then newest first within each group.
  */
 export function getHistory(): SavedAnalysis[] {
   if (typeof window === "undefined") return [];
@@ -44,7 +46,12 @@ export function getHistory(): SavedAnalysis[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as SavedAnalysis[];
-    return parsed.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+    return parsed.sort((a, b) => {
+      // Pinned entries float to the top
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      return new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime();
+    });
   } catch {
     return [];
   }
@@ -52,7 +59,7 @@ export function getHistory(): SavedAnalysis[] {
 
 /**
  * Save an analysis to history. Deduplicates by repoSlug (keeps latest).
- * Evicts oldest entries beyond MAX_ENTRIES.
+ * Evicts oldest entries beyond MAX_ENTRIES — pinned entries are never evicted.
  */
 export function saveAnalysis(entry: Omit<SavedAnalysis, "id" | "savedAt">): SavedAnalysis {
   const history = getHistory();
@@ -62,19 +69,26 @@ export function saveAnalysis(entry: Omit<SavedAnalysis, "id" | "savedAt">): Save
     savedAt: new Date().toISOString(),
   };
 
-  // Remove older entry for same repo (keep only latest)
+  // Remove older entry for same repo (keep only latest), preserving its pinned state
+  const existing = history.find((h) => h.repoSlug === entry.repoSlug);
+  if (existing?.pinned && !entry.pinned) {
+    saved.pinned = true;
+  }
   const filtered = history.filter((h) => h.repoSlug !== entry.repoSlug);
   filtered.unshift(saved);
 
-  // Evict oldest beyond limit
-  const trimmed = filtered.slice(0, MAX_ENTRIES);
+  // Evict oldest non-pinned entries beyond limit
+  const pinned = filtered.filter((h) => h.pinned);
+  const unpinned = filtered.filter((h) => !h.pinned);
+  const trimmedUnpinned = unpinned.slice(0, Math.max(0, MAX_ENTRIES - pinned.length));
+  const trimmed = [...pinned, ...trimmedUnpinned];
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
   } catch {
-    // localStorage full — remove oldest and retry
+    // localStorage full — remove oldest unpinned entries and retry
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed.slice(0, 10)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([...pinned, ...trimmedUnpinned.slice(0, 5)]));
     } catch {
       // Give up silently
     }
@@ -88,6 +102,43 @@ export function saveAnalysis(entry: Omit<SavedAnalysis, "id" | "savedAt">): Save
  */
 export function deleteAnalysis(id: string): void {
   const history = getHistory().filter((h) => h.id !== id);
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Pin an analysis so it always appears first and is never auto-evicted.
+ */
+export function pinAnalysis(id: string): void {
+  setAnalysisPinned(id, true);
+}
+
+/**
+ * Unpin a previously pinned analysis.
+ */
+export function unpinAnalysis(id: string): void {
+  setAnalysisPinned(id, false);
+}
+
+/**
+ * Toggle the pinned state of an analysis.
+ * Returns the new pinned state.
+ */
+export function togglePinAnalysis(id: string): boolean {
+  const history = getHistory();
+  const entry = history.find((h) => h.id === id);
+  const newState = !entry?.pinned;
+  setAnalysisPinned(id, newState);
+  return newState;
+}
+
+function setAnalysisPinned(id: string, pinned: boolean): void {
+  const history = getHistory().map((h) =>
+    h.id === id ? { ...h, pinned } : h
+  );
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
   } catch {

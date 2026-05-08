@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getHistory, deleteAnalysis, clearHistory, seedHistoryIfEmpty, type SavedAnalysis } from "@/lib/history";
+import {
+  getHistory,
+  deleteAnalysis,
+  clearHistory,
+  seedHistoryIfEmpty,
+  togglePinAnalysis,
+  type SavedAnalysis,
+} from "@/lib/history";
 
 interface HistoryPanelProps {
   onLoad: (entry: SavedAnalysis) => void;
@@ -56,7 +63,11 @@ export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelPro
         {displayList.map((entry) => (
           <div
             key={entry.id}
-            className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-surface/50 border border-edge/60 hover:border-gold/30 transition-all duration-300 group"
+            className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl border transition-all duration-300 group ${
+              entry.pinned
+                ? "bg-gold/5 border-gold/20 hover:border-gold/40"
+                : "bg-surface/50 border-edge/60 hover:border-gold/30"
+            }`}
           >
             <button
               onClick={() => onLoad(entry)}
@@ -64,6 +75,13 @@ export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelPro
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
+                  {entry.pinned && (
+                    <span className="text-gold/80 shrink-0" title="Pinned">
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                      </svg>
+                    </span>
+                  )}
                   <span className="font-mono text-sm font-medium text-cream-dim truncate group-hover:text-cream transition-colors">
                     {entry.repoSlug}
                   </span>
@@ -90,6 +108,24 @@ export default function HistoryPanel({ onLoad, refreshKey = 0 }: HistoryPanelPro
               <span className="text-faint group-hover:text-gold transition-colors shrink-0 text-xs font-mono">
                 View →
               </span>
+            </button>
+            {/* Pin / unpin */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePinAnalysis(entry.id);
+                setHistory(getHistory());
+              }}
+              className={`transition-colors shrink-0 p-1 ${
+                entry.pinned
+                  ? "text-gold hover:text-gold/60"
+                  : "text-faint hover:text-gold"
+              }`}
+              title={entry.pinned ? "Unpin" : "Pin to top"}
+            >
+              <svg className="w-3.5 h-3.5" fill={entry.pinned ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+              </svg>
             </button>
             <button
               onClick={(e) => {
