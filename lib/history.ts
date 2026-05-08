@@ -77,10 +77,13 @@ export function saveAnalysis(entry: Omit<SavedAnalysis, "id" | "savedAt">): Save
   const filtered = history.filter((h) => h.repoSlug !== entry.repoSlug);
   filtered.unshift(saved);
 
-  // Evict oldest non-pinned entries beyond limit
+  // Evict oldest non-pinned entries beyond limit.
+  // Pinned entries are intentionally allowed to exceed MAX_ENTRIES — they represent
+  // analyses the user explicitly marked as important and should never be auto-removed.
   const pinned = filtered.filter((h) => h.pinned);
   const unpinned = filtered.filter((h) => !h.pinned);
-  const trimmedUnpinned = unpinned.slice(0, Math.max(0, MAX_ENTRIES - pinned.length));
+  const unpinnedBudget = Math.max(0, MAX_ENTRIES - pinned.length);
+  const trimmedUnpinned = unpinned.slice(0, unpinnedBudget);
   const trimmed = [...pinned, ...trimmedUnpinned];
 
   try {

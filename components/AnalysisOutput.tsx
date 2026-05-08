@@ -101,24 +101,23 @@ function AnalysisOutput({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeTab, searchOpen]);
 
-  // Navigate to a search result by scrolling to its heading
-  const jumpToResult = useCallback((anchor: string) => {
-    const el = document.getElementById(anchor);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    } else {
-      // Fallback: try matching heading text via querySelector
-      const headings = articleRef.current?.querySelectorAll("h1,h2,h3,h4,h5,h6");
-      if (headings) {
-        for (const h of headings) {
-          if (h.textContent?.toLowerCase().includes(searchQuery.toLowerCase())) {
-            h.scrollIntoView({ behavior: "smooth", block: "start" });
-            break;
-          }
-        }
-      }
+  // Navigate to a search result by scrolling to its heading.
+  // react-markdown renders headings with id attributes that match the anchor slug,
+  // so document.getElementById should always find the element.  The heading text
+  // fallback handles edge cases where the id was not generated (e.g. during streaming).
+  const jumpToResult = useCallback((anchor: string, heading: string) => {
+    const byId = document.getElementById(anchor);
+    if (byId) {
+      byId.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
     }
-  }, [searchQuery]);
+    // Fallback: locate by exact heading text match within the article only
+    if (articleRef.current) {
+      const h = Array.from(articleRef.current.querySelectorAll("h1,h2,h3,h4,h5,h6"))
+        .find((el) => el.textContent?.trim() === heading);
+      h?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, []);
 
   const handleCopyMarkdown = async () => {
     await navigator.clipboard.writeText(markdown);
@@ -320,7 +319,7 @@ function AnalysisOutput({
                 {searchResults.map((result, i) => (
                   <button
                     key={result.anchor + i}
-                    onClick={() => { jumpToResult(result.anchor); setSearchFocusIdx(i); }}
+                    onClick={() => { jumpToResult(result.anchor, result.heading); setSearchFocusIdx(i); }}
                     className={`text-left px-3 py-2 rounded-lg transition-colors duration-150 border ${
                       searchFocusIdx === i
                         ? "bg-gold/10 border-gold/30 text-cream"
