@@ -4,7 +4,13 @@ import React, { useState, useRef, useMemo, useEffect, useCallback } from "react"
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { RepoInfo } from "@/lib/github";
+import type { GraphifyResult } from "@/lib/graphify";
+import type { SecurityReport } from "@/lib/security";
+import { buildGraphifyGraph } from "@/lib/graphify";
+import { auditRepositorySecurity } from "@/lib/security";
 import DependencyGraph from "./DependencyGraph";
+import GraphifyVisualizer from "./GraphifyVisualizer";
+import SecurityRadar from "./SecurityRadar";
 import MetricsDashboard from "./MetricsDashboard";
 import TableOfContents from "./TableOfContents";
 import { computeProjectMetrics } from "@/lib/metrics";
@@ -33,6 +39,10 @@ interface AnalysisOutputProps {
   }>;
   /** File data for metrics dashboard */
   fileData?: Array<{ path: string; content: string }>;
+  /** Graphify codebase knowledge graph */
+  graphifyData?: GraphifyResult;
+  /** Security audit report */
+  securityReport?: SecurityReport;
 }
 
 function phaseLabel(phase: string): string {
@@ -57,9 +67,11 @@ function AnalysisOutput({
   filePaths,
   moduleChunks,
   fileData,
+  graphifyData,
+  securityReport,
 }: AnalysisOutputProps) {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"report" | "metrics" | "graph">("report");
+  const [activeTab, setActiveTab] = useState<"report" | "metrics" | "graph" | "graphify" | "security">("report");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusIdx, setSearchFocusIdx] = useState(0);
@@ -72,6 +84,24 @@ function AnalysisOutput({
     if (!fileData || fileData.length === 0) return null;
     return computeProjectMetrics(fileData).healthScore;
   }, [fileData]);
+
+  // Compute graphify data on-demand if not provided from pipeline
+  const resolvedGraphifyData = useMemo(() => {
+    if (graphifyData) return graphifyData;
+    if (fileData && fileData.length > 0) {
+      return buildGraphifyGraph(fileData);
+    }
+    return null;
+  }, [graphifyData, fileData]);
+
+  // Compute security report on-demand if not provided from pipeline
+  const resolvedSecurityReport = useMemo(() => {
+    if (securityReport) return securityReport;
+    if (fileData && fileData.length > 0) {
+      return auditRepositorySecurity(fileData);
+    }
+    return null;
+  }, [securityReport, fileData]);
 
   // Search results
   const searchResults = useMemo(() => {
@@ -238,6 +268,8 @@ function AnalysisOutput({
               { id: "report" as const, label: "Report", icon: "◆" },
               { id: "metrics" as const, label: "Metrics", icon: "▣", disabled: !fileData?.length },
               { id: "graph" as const, label: "Graph", icon: "◈", disabled: !filePaths?.length && !moduleChunks?.length },
+              { id: "graphify" as const, label: "Graphify", icon: "⟐", disabled: !resolvedGraphifyData },
+              { id: "security" as const, label: "Security", icon: "🔒", disabled: !resolvedSecurityReport },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -436,6 +468,20 @@ function AnalysisOutput({
               filePaths={filePaths}
               modules={moduleChunks}
             />
+          </div>
+        )}
+
+        {/* ═══ Graphify Tab ═══ */}
+        {activeTab === "graphify" && resolvedGraphifyData && (
+          <div className="py-4">
+            <GraphifyVisualizer graphData={resolvedGraphifyData} />
+          </div>
+        )}
+
+        {/* ═══ Security Tab ═══ */}
+        {activeTab === "security" && resolvedSecurityReport && (
+          <div className="py-4">
+            <SecurityRadar report={resolvedSecurityReport} />
           </div>
         )}
 

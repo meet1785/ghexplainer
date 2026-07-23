@@ -13,6 +13,8 @@ import CommandPalette from "@/components/CommandPalette";
 import { type CommandAction } from "@/components/CommandPalette";
 import { saveAnalysis, type SavedAnalysis } from "@/lib/history";
 import type { RepoInfo } from "@/lib/github";
+import type { GraphifyResult } from "@/lib/graphify";
+import type { SecurityReport } from "@/lib/security";
 import { buildShareUrl, parseRepoFromSearchParams } from "@/lib/share";
 
 type AppState = "idle" | "loading" | "done" | "error";
@@ -36,6 +38,8 @@ interface AnalysisData {
   filePaths?: string[];
   moduleChunks?: ModuleChunk[];
   fileData?: Array<{ path: string; content: string }>;
+  graphifyData?: GraphifyResult;
+  securityReport?: SecurityReport;
 }
 
 const HOW_IT_WORKS = [
@@ -236,6 +240,8 @@ export default function Home() {
     let filePaths: string[] | undefined;
     let moduleChunks: ModuleChunk[] | undefined;
     let fileData: Array<{ path: string; content: string }> | undefined;
+    let graphifyData: GraphifyResult | undefined;
+    let securityReport: SecurityReport | undefined;
 
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
@@ -287,6 +293,8 @@ export default function Home() {
               filePaths = event.filePaths;
               moduleChunks = event.moduleChunks;
               fileData = event.fileData;
+              graphifyData = event.graphifyData;
+              securityReport = event.securityReport;
               break;
             case "partial":
               partialMarkdown = event.markdown ?? "";
@@ -305,6 +313,7 @@ export default function Home() {
                   filePaths,
                   moduleChunks,
                   fileData,
+                  graphifyData,
                 };
                 setResult(partialData);
                 saveToHistory(partialData, url);
@@ -325,6 +334,8 @@ export default function Home() {
                   filePaths,
                   moduleChunks,
                   fileData,
+                  graphifyData,
+                  securityReport,
                 };
                 setResult(updatedData);
                 saveToHistory(updatedData, url);
@@ -346,6 +357,8 @@ export default function Home() {
                   filePaths,
                   moduleChunks,
                   fileData,
+                  graphifyData,
+                  securityReport,
                 };
                 setResult(doneData);
                 // Update the address bar so the current URL is shareable
@@ -385,6 +398,8 @@ export default function Home() {
           filePaths,
           moduleChunks,
           fileData,
+          graphifyData,
+          securityReport,
         };
         setResult(partialData);
         saveToHistory(partialData, url);
@@ -615,6 +630,8 @@ export default function Home() {
             filePaths={result.filePaths}
             moduleChunks={result.moduleChunks}
             fileData={result.fileData}
+            graphifyData={result.graphifyData}
+            securityReport={result.securityReport}
           />
         </div>
       )}

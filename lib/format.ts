@@ -62,5 +62,5 @@ export function formatBytes(bytes: number): string {
  */
 export function formatCount(n: number): string {
   if (!isFinite(n)) return "—";
-  return n.toLocaleString();
+  return n.toLocaleString("en-US");
 }
