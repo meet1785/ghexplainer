@@ -23,6 +23,7 @@ import { analyzeWithGemini, analyzeWithGeminiStream } from "./gemini";
 import { analysisCache } from "./cache";
 import { buildGraphifyGraph, type GraphifyResult } from "./graphify";
 import { auditRepositorySecurity, type SecurityReport } from "./security";
+import { analyzeTestingHealth, type TestIQReport } from "./testing";
 
 export interface AnalysisResult {
   repoInfo: RepoInfo;
@@ -36,6 +37,8 @@ export interface AnalysisResult {
   graphifyData?: GraphifyResult;
   /** Automated security and vulnerability audit report */
   securityReport?: SecurityReport;
+  /** Testing health and coverage analyzer report */
+  testReport?: TestIQReport;
 }
 
 export interface AnalysisOptions {
@@ -107,13 +110,17 @@ export async function analyzeRepo(
   const chunks: CodeChunk[] = chunkByModule(files);
   notify(`Created ${chunks.length} module chunks`);
 
-  // Step 5.5: Build Graphify knowledge graph & run Security Audit
+  // Step 5.5: Build Graphify knowledge graph & run Security & Testing Audit
   notify("Building Graphify knowledge graph…");
   const graphifyData = buildGraphifyGraph(files);
 
   notify("Auditing codebase security & vulnerability posture…");
   const securityReport = auditRepositorySecurity(files);
   notify(`Security audit complete: Grade ${securityReport.grade} (${securityReport.score}/100), ${securityReport.findings.length} finding(s)`);
+
+  notify("Analyzing testing health and code coverage…");
+  const testReport = analyzeTestingHealth(files);
+  notify(`Testing health complete: Score ${testReport.score}/100, ${testReport.untestedSourceFiles.length} untested modules`);
 
   // Step 6: Multi-pass Gemini analysis
   notify(
@@ -146,6 +153,7 @@ export async function analyzeRepo(
     cached: false,
     graphifyData,
     securityReport,
+    testReport,
   };
 
   // Step 8: Cache the result
@@ -161,7 +169,7 @@ export async function analyzeRepo(
  */
 export type StreamEvent =
   | { type: "progress"; step: string }
-  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number; filePaths?: string[]; moduleChunks?: Array<{ module: string; files: Array<{ path: string; content: string }>; totalChars: number; dependencies: string[] }>; fileData?: Array<{ path: string; content: string }>; graphifyData?: GraphifyResult; securityReport?: SecurityReport }
+  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number; filePaths?: string[]; moduleChunks?: Array<{ module: string; files: Array<{ path: string; content: string }>; totalChars: number; dependencies: string[] }>; fileData?: Array<{ path: string; content: string }>; graphifyData?: GraphifyResult; securityReport?: SecurityReport; testReport?: TestIQReport }
   | { type: "partial"; markdown: string; phase: string; complete: boolean }
   | { type: "done"; markdown: string; durationMs: number; cached: boolean }
   | { type: "error"; message: string };
@@ -212,10 +220,11 @@ export async function* analyzeRepoStream(
   yield { type: "progress", step: "Chunking code by module…" };
   const chunks: CodeChunk[] = chunkByModule(files);
 
-  // Step 5.5: Build Graphify knowledge graph & Security Audit
-  yield { type: "progress", step: "Building Graphify knowledge graph & auditing security…" };
+  // Step 5.5: Build Graphify knowledge graph & Security Audit & Testing Audit
+  yield { type: "progress", step: "Building Graphify knowledge graph & auditing security & testing health…" };
   const graphifyData = buildGraphifyGraph(files);
   const securityReport = auditRepositorySecurity(files);
+  const testReport = analyzeTestingHealth(files);
 
   // Send metadata + file data for metrics/graph features
   const filePaths = tree.filter(f => f.type === "blob").map(f => f.path);
@@ -235,6 +244,7 @@ export async function* analyzeRepoStream(
     fileData: files.map(f => ({ path: f.path, content: f.content })),
     graphifyData,
     securityReport,
+    testReport,
   };
 
   // Step 6: Stream Gemini analysis — yields partial markdown after each call
@@ -262,6 +272,7 @@ export async function* analyzeRepoStream(
     cached: false,
     graphifyData,
     securityReport,
+    testReport,
   };
   analysisCache.set(cacheKey, result);
 

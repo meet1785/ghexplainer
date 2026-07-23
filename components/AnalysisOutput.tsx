@@ -8,9 +8,12 @@ import type { GraphifyResult } from "@/lib/graphify";
 import type { SecurityReport } from "@/lib/security";
 import { buildGraphifyGraph } from "@/lib/graphify";
 import { auditRepositorySecurity } from "@/lib/security";
+import type { TestIQReport } from "@/lib/testing";
+import { analyzeTestingHealth } from "@/lib/testing";
 import DependencyGraph from "./DependencyGraph";
 import GraphifyVisualizer from "./GraphifyVisualizer";
 import SecurityRadar from "./SecurityRadar";
+import TestIQDashboard from "./TestIQDashboard";
 import MetricsDashboard from "./MetricsDashboard";
 import TableOfContents from "./TableOfContents";
 import { computeProjectMetrics } from "@/lib/metrics";
@@ -43,6 +46,8 @@ interface AnalysisOutputProps {
   graphifyData?: GraphifyResult;
   /** Security audit report */
   securityReport?: SecurityReport;
+  /** Testing health report */
+  testReport?: TestIQReport;
 }
 
 function phaseLabel(phase: string): string {
@@ -69,9 +74,10 @@ function AnalysisOutput({
   fileData,
   graphifyData,
   securityReport,
+  testReport,
 }: AnalysisOutputProps) {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"report" | "metrics" | "graph" | "graphify" | "security">("report");
+  const [activeTab, setActiveTab] = useState<"report" | "metrics" | "graph" | "graphify" | "security" | "test">("report");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusIdx, setSearchFocusIdx] = useState(0);
@@ -102,6 +108,15 @@ function AnalysisOutput({
     }
     return null;
   }, [securityReport, fileData]);
+
+  // Compute test report on-demand if not provided from pipeline
+  const resolvedTestReport = useMemo(() => {
+    if (testReport) return testReport;
+    if (fileData && fileData.length > 0) {
+      return analyzeTestingHealth(fileData);
+    }
+    return null;
+  }, [testReport, fileData]);
 
   // Search results
   const searchResults = useMemo(() => {
@@ -270,6 +285,7 @@ function AnalysisOutput({
               { id: "graph" as const, label: "Graph", icon: "◈", disabled: !filePaths?.length && !moduleChunks?.length },
               { id: "graphify" as const, label: "Graphify", icon: "⟐", disabled: !resolvedGraphifyData },
               { id: "security" as const, label: "Security", icon: "🔒", disabled: !resolvedSecurityReport },
+              { id: "test" as const, label: "Testing", icon: "🧪", disabled: !resolvedTestReport },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -482,6 +498,13 @@ function AnalysisOutput({
         {activeTab === "security" && resolvedSecurityReport && (
           <div className="py-4">
             <SecurityRadar report={resolvedSecurityReport} />
+          </div>
+        )}
+
+        {/* ═══ Testing Tab ═══ */}
+        {activeTab === "test" && resolvedTestReport && (
+          <div className="py-4">
+            <TestIQDashboard report={resolvedTestReport} />
           </div>
         )}
 

@@ -15,6 +15,7 @@ import { saveAnalysis, type SavedAnalysis } from "@/lib/history";
 import type { RepoInfo } from "@/lib/github";
 import type { GraphifyResult } from "@/lib/graphify";
 import type { SecurityReport } from "@/lib/security";
+import type { TestIQReport } from "@/lib/testing";
 import { buildShareUrl, parseRepoFromSearchParams } from "@/lib/share";
 
 type AppState = "idle" | "loading" | "done" | "error";
@@ -40,6 +41,7 @@ interface AnalysisData {
   fileData?: Array<{ path: string; content: string }>;
   graphifyData?: GraphifyResult;
   securityReport?: SecurityReport;
+  testReport?: TestIQReport;
 }
 
 const HOW_IT_WORKS = [
@@ -242,6 +244,7 @@ export default function Home() {
     let fileData: Array<{ path: string; content: string }> | undefined;
     let graphifyData: GraphifyResult | undefined;
     let securityReport: SecurityReport | undefined;
+    let testReport: TestIQReport | undefined;
 
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
@@ -295,6 +298,7 @@ export default function Home() {
               fileData = event.fileData;
               graphifyData = event.graphifyData;
               securityReport = event.securityReport;
+              testReport = event.testReport;
               break;
             case "partial":
               partialMarkdown = event.markdown ?? "";
@@ -314,6 +318,8 @@ export default function Home() {
                   moduleChunks,
                   fileData,
                   graphifyData,
+                  securityReport,
+                  testReport,
                 };
                 setResult(partialData);
                 saveToHistory(partialData, url);
@@ -336,6 +342,7 @@ export default function Home() {
                   fileData,
                   graphifyData,
                   securityReport,
+                  testReport,
                 };
                 setResult(updatedData);
                 saveToHistory(updatedData, url);
@@ -359,6 +366,7 @@ export default function Home() {
                   fileData,
                   graphifyData,
                   securityReport,
+                  testReport,
                 };
                 setResult(doneData);
                 // Update the address bar so the current URL is shareable
@@ -400,6 +408,7 @@ export default function Home() {
           fileData,
           graphifyData,
           securityReport,
+          testReport,
         };
         setResult(partialData);
         saveToHistory(partialData, url);
@@ -632,6 +641,7 @@ export default function Home() {
             fileData={result.fileData}
             graphifyData={result.graphifyData}
             securityReport={result.securityReport}
+            testReport={result.testReport}
           />
         </div>
       )}

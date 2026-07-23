@@ -8,6 +8,7 @@ import { Command } from "commander";
 import { analyzeRepo } from "../lib/analyzer";
 import { buildGraphifyGraph, toMermaidDiagram, toGraphJSON } from "../lib/graphify";
 import { auditRepositorySecurity, toSecurityMarkdown, toSecurityJSON } from "../lib/security";
+import { toTestIQMarkdown, toTestIQJSON } from "../lib/testing";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -43,7 +44,8 @@ program
   .option("--no-cache", "Bypass in-memory cache and force a fresh analysis")
   .option("-g, --graphify [format]", "Export Graphify knowledge graph (mermaid or json, default: mermaid)")
   .option("-s, --security [format]", "Export Security Radar audit report (markdown or json, default: markdown)")
-  .action(async (url: string, opts: { output?: string; githubToken?: string; geminiKey?: string; noCache?: boolean; graphify?: string | boolean; security?: string | boolean }) => {
+  .option("-t, --tests [format]", "Export TestIQ health report (markdown or json, default: markdown)")
+  .action(async (url: string, opts: { output?: string; githubToken?: string; geminiKey?: string; noCache?: boolean; graphify?: string | boolean; security?: string | boolean; tests?: string | boolean }) => {
     console.log("\n🔍 ghexplainer — analyzing:", url);
     console.log("─".repeat(60));
 
@@ -145,6 +147,38 @@ program
               const mdPath = opts.output.replace(/\.md$/, "") + "-security.md";
               fs.writeFileSync(path.resolve(mdPath), mdOutput, "utf-8");
               console.log(`📄 Security Markdown saved to: ${path.resolve(mdPath)}\n`);
+            } else {
+              console.log(mdOutput);
+            }
+          }
+        }
+      }
+
+      // TestIQ export
+      if (opts.tests) {
+        const testReport = result.testReport;
+        if (testReport) {
+          const format = typeof opts.tests === "string" ? opts.tests : "markdown";
+          console.log("\n" + "─".repeat(60));
+          console.log(`🧪 TestIQ Health Audit — Score: ${testReport.score}/100`);
+          console.log(`Summary: ${testReport.totalTestFiles} test files, ${testReport.totalCases} cases, ${testReport.totalSmells} smells, ${testReport.untestedSourceFiles.length} untested modules`);
+          console.log("─".repeat(60) + "\n");
+
+          if (format === "json") {
+            const jsonOutput = toTestIQJSON(testReport);
+            if (opts.output) {
+              const jsonPath = opts.output.replace(/\.md$/, "") + "-testiq.json";
+              fs.writeFileSync(path.resolve(jsonPath), jsonOutput, "utf-8");
+              console.log(`📄 TestIQ JSON saved to: ${path.resolve(jsonPath)}\n`);
+            } else {
+              console.log(jsonOutput);
+            }
+          } else {
+            const mdOutput = toTestIQMarkdown(testReport);
+            if (opts.output) {
+              const mdPath = opts.output.replace(/\.md$/, "") + "-testiq.md";
+              fs.writeFileSync(path.resolve(mdPath), mdOutput, "utf-8");
+              console.log(`📄 TestIQ Markdown saved to: ${path.resolve(mdPath)}\n`);
             } else {
               console.log(mdOutput);
             }
