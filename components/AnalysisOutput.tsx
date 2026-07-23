@@ -3,6 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { FileText, Download, Copy, Terminal, ExternalLink, RefreshCw, Layout, Menu, Share2, Search, X, MessageSquare, Code, Shield, Beaker, Layers, Webhook, Users } from "lucide-react";
 import type { RepoInfo } from "@/lib/github";
 import type { GraphifyResult } from "@/lib/graphify";
 import type { SecurityReport } from "@/lib/security";
@@ -10,11 +11,17 @@ import { buildGraphifyGraph } from "@/lib/graphify";
 import { auditRepositorySecurity } from "@/lib/security";
 import type { TestIQReport } from "@/lib/testing";
 import { analyzeTestingHealth } from "@/lib/testing";
+import type { ArchLensReport } from "@/lib/archlens";
+import type { RouteMapReport } from "@/lib/routemap";
+import type { TeamPulseReport } from "@/lib/teampulse";
 import DependencyGraph from "./DependencyGraph";
 import GraphifyVisualizer from "./GraphifyVisualizer";
 import SecurityRadar from "./SecurityRadar";
 import TestIQDashboard from "./TestIQDashboard";
 import MetricsDashboard from "./MetricsDashboard";
+import { ArchLensDashboard } from "./ArchLensDashboard";
+import { RouteMapDashboard } from "./RouteMapDashboard";
+import { TeamPulseDashboard } from "./TeamPulseDashboard";
 import TableOfContents from "./TableOfContents";
 import { computeProjectMetrics } from "@/lib/metrics";
 import { formatDuration } from "@/lib/format";
@@ -48,7 +55,12 @@ interface AnalysisOutputProps {
   securityReport?: SecurityReport;
   /** Testing health report */
   testReport?: TestIQReport;
+  archReport?: ArchLensReport;
+  apiReport?: RouteMapReport;
+  teamReport?: TeamPulseReport;
 }
+
+type TabType = 'report' | 'metrics' | 'graph' | 'graphify' | 'security' | 'testing' | 'arch' | 'api' | 'team';
 
 function phaseLabel(phase: string): string {
   if (!phase || phase === "complete") return "";
@@ -57,6 +69,26 @@ function phaseLabel(phase: string): string {
   if (phase.startsWith("batch-")) return `Section batch ${phase.replace("batch-", "")} of 3`;
   return phase;
 }
+
+const TabButton = ({ id, icon: Icon, label, count, active, onClick, disabled }: any) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`flex items-center gap-1.5 px-4 py-2 text-xs font-mono transition-all duration-200 border-b-2 ${
+      active
+        ? "text-gold border-gold"
+        : disabled
+        ? "text-faint/30 border-transparent cursor-not-allowed"
+        : "text-faint hover:text-cream border-transparent hover:border-edge"
+    }`}
+  >
+    <Icon className="w-3.5 h-3.5" />
+    <span>{label}</span>
+    {count !== undefined && count > 0 && (
+      <span className="ml-1 px-1 py-0.5 bg-surface rounded text-[10px]">{count}</span>
+    )}
+  </button>
+);
 
 function AnalysisOutput({
   markdown,
@@ -75,9 +107,12 @@ function AnalysisOutput({
   graphifyData,
   securityReport,
   testReport,
+  archReport,
+  apiReport,
+  teamReport,
 }: AnalysisOutputProps) {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"report" | "metrics" | "graph" | "graphify" | "security" | "test">("report");
+  const [activeTab, setActiveTab] = useState<TabType>("report");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusIdx, setSearchFocusIdx] = useState(0);
@@ -85,13 +120,11 @@ function AnalysisOutput({
   const isStreaming = !complete && phase !== "complete";
   const articleRef = useRef<HTMLElement>(null);
 
-  // Compute health score from file data for the header badge
   const healthScore = useMemo(() => {
     if (!fileData || fileData.length === 0) return null;
     return computeProjectMetrics(fileData).healthScore;
   }, [fileData]);
 
-  // Compute graphify data on-demand if not provided from pipeline
   const resolvedGraphifyData = useMemo(() => {
     if (graphifyData) return graphifyData;
     if (fileData && fileData.length > 0) {
@@ -100,7 +133,6 @@ function AnalysisOutput({
     return null;
   }, [graphifyData, fileData]);
 
-  // Compute security report on-demand if not provided from pipeline
   const resolvedSecurityReport = useMemo(() => {
     if (securityReport) return securityReport;
     if (fileData && fileData.length > 0) {
@@ -109,7 +141,6 @@ function AnalysisOutput({
     return null;
   }, [securityReport, fileData]);
 
-  // Compute test report on-demand if not provided from pipeline
   const resolvedTestReport = useMemo(() => {
     if (testReport) return testReport;
     if (fileData && fileData.length > 0) {
@@ -118,7 +149,6 @@ function AnalysisOutput({
     return null;
   }, [testReport, fileData]);
 
-  // Search results
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     return searchSections(markdown, searchQuery);
@@ -129,7 +159,6 @@ function AnalysisOutput({
     return countTotalMatches(markdown, searchQuery);
   }, [markdown, searchQuery]);
 
-  // Open search bar on Cmd+F / Ctrl+F
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "f" && activeTab === "report") {
@@ -146,17 +175,12 @@ function AnalysisOutput({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeTab, searchOpen]);
 
-  // Navigate to a search result by scrolling to its heading.
-  // react-markdown renders headings with id attributes that match the anchor slug,
-  // so document.getElementById should always find the element.  The heading text
-  // fallback handles edge cases where the id was not generated (e.g. during streaming).
   const jumpToResult = useCallback((anchor: string, heading: string) => {
     const byId = document.getElementById(anchor);
     if (byId) {
       byId.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
-    // Fallback: locate by exact heading text match within the article only
     if (articleRef.current) {
       const h = Array.from(articleRef.current.querySelectorAll("h1,h2,h3,h4,h5,h6"))
         .find((el) => el.textContent?.trim() === heading);
@@ -176,7 +200,6 @@ function AnalysisOutput({
   };
 
   const handleDownloadHTML = () => {
-    // Dynamic import to avoid bundling on initial load
     import("@/lib/export").then(({ markdownToHtml }) => {
       const html = markdownToHtml(markdown, `${repoInfo.owner}/${repoInfo.repo}`);
       const blob = new Blob([html], { type: "text/html" });
@@ -186,15 +209,12 @@ function AnalysisOutput({
 
   return (
     <div className="w-full">
-      {/* Table of Contents — only on report tab when complete */}
       {activeTab === "report" && (
         <TableOfContents containerRef={articleRef} isComplete={complete} />
       )}
 
-      {/* Sticky header bar */}
       <div className="sticky top-0.5 z-20 bg-midnight/80 backdrop-blur-xl border-b border-edge">
         <div className="max-w-5xl mx-auto px-6 py-3 flex flex-wrap items-center justify-between gap-3">
-          {/* Left: back + repo info */}
           <div className="flex items-center gap-3">
             <button
               onClick={onReset}
@@ -227,7 +247,6 @@ function AnalysisOutput({
             </div>
           </div>
 
-          {/* Center: stats */}
           <div className="hidden sm:flex items-center gap-3 text-[11px] text-faint font-mono">
             {repoInfo.stars > 0 && <span>⭐ {repoInfo.stars.toLocaleString()}</span>}
             {repoInfo.language && <span>· {repoInfo.language}</span>}
@@ -249,7 +268,6 @@ function AnalysisOutput({
             )}
           </div>
 
-          {/* Right: actions */}
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopyMarkdown}
@@ -276,35 +294,18 @@ function AnalysisOutput({
           </div>
         </div>
 
-        {/* View tabs — Report / Metrics / Graph */}
-        <div className="max-w-5xl mx-auto px-6 flex items-center justify-between border-t border-edge/40">
+        <div className="max-w-5xl mx-auto px-6 flex items-center justify-between border-t border-edge/40 overflow-x-auto">
           <div className="flex items-center gap-0">
-            {[
-              { id: "report" as const, label: "Report", icon: "◆" },
-              { id: "metrics" as const, label: "Metrics", icon: "▣", disabled: !fileData?.length },
-              { id: "graph" as const, label: "Graph", icon: "◈", disabled: !filePaths?.length && !moduleChunks?.length },
-              { id: "graphify" as const, label: "Graphify", icon: "⟐", disabled: !resolvedGraphifyData },
-              { id: "security" as const, label: "Security", icon: "🔒", disabled: !resolvedSecurityReport },
-              { id: "test" as const, label: "Testing", icon: "🧪", disabled: !resolvedTestReport },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => !tab.disabled && setActiveTab(tab.id)}
-                disabled={tab.disabled}
-                className={`flex items-center gap-1.5 px-4 py-2 text-xs font-mono transition-all duration-200 border-b-2 ${
-                  activeTab === tab.id
-                    ? "text-gold border-gold"
-                    : tab.disabled
-                    ? "text-faint/30 border-transparent cursor-not-allowed"
-                    : "text-faint hover:text-cream border-transparent hover:border-edge"
-                }`}
-              >
-                <span>{tab.icon}</span>
-                <span>{tab.label}</span>
-              </button>
-            ))}
+            <TabButton id="report" icon={FileText} label="Report" active={activeTab === 'report'} onClick={() => setActiveTab('report')} />
+            <TabButton id="metrics" icon={Layout} label="Metrics" active={activeTab === 'metrics'} disabled={!fileData?.length} onClick={() => setActiveTab('metrics')} />
+            <TabButton id="graph" icon={Code} label="Graph" active={activeTab === 'graph'} disabled={!filePaths?.length && !moduleChunks?.length} onClick={() => setActiveTab('graph')} />
+            <TabButton id="graphify" icon={Layers} label="Graphify" active={activeTab === 'graphify'} disabled={!resolvedGraphifyData} onClick={() => setActiveTab('graphify')} />
+            <TabButton id="security" icon={Shield} label="Security" active={activeTab === 'security'} disabled={!resolvedSecurityReport} onClick={() => setActiveTab('security')} />
+            <TabButton id="testing" icon={Beaker} label="TestIQ" count={resolvedTestReport?.untestedSourceFiles?.length} active={activeTab === 'testing'} disabled={!resolvedTestReport} onClick={() => setActiveTab('testing')} />
+            <TabButton id="arch" icon={Layers} label="ArchLens" count={archReport?.totalDependencies} active={activeTab === 'arch'} disabled={!archReport} onClick={() => setActiveTab('arch')} />
+            <TabButton id="api" icon={Webhook} label="RouteMap" count={apiReport?.totalRoutes} active={activeTab === 'api'} disabled={!apiReport} onClick={() => setActiveTab('api')} />
+            <TabButton id="team" icon={Users} label="TeamPulse" active={activeTab === 'team'} disabled={!teamReport} onClick={() => setActiveTab('team')} />
           </div>
-          {/* Search toggle — only visible on report tab */}
           {activeTab === "report" && (
             <button
               onClick={() => {
@@ -313,29 +314,23 @@ function AnalysisOutput({
                 setSearchFocusIdx(0);
                 setTimeout(() => searchInputRef.current?.focus(), 50);
               }}
-              title="Search report (Ctrl+F)"
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-mono transition-all duration-200 ${
                 searchOpen
                   ? "text-gold bg-gold/10 border border-gold/30"
                   : "text-faint hover:text-cream"
               }`}
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
-              </svg>
+              <Search className="w-3.5 h-3.5" />
               <span>Search</span>
             </button>
           )}
         </div>
 
-        {/* Inline search panel */}
         {searchOpen && activeTab === "report" && (
           <div className="max-w-5xl mx-auto px-6 py-3 border-t border-edge/30 bg-midnight/60">
             <div className="flex items-center gap-3">
               <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface border border-edge focus-within:border-gold/50 transition-colors">
-                <svg className="w-3.5 h-3.5 text-faint shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
-                </svg>
+                <Search className="w-3.5 h-3.5 text-faint shrink-0" />
                 <input
                   ref={searchInputRef}
                   type="text"
@@ -344,57 +339,18 @@ function AnalysisOutput({
                   placeholder="Search in report…"
                   className="flex-1 bg-transparent text-sm text-cream placeholder-faint outline-none font-mono"
                 />
-                {searchQuery && (
-                  <span className="text-[11px] font-mono text-faint shrink-0">
-                    {totalMatches} match{totalMatches !== 1 ? "es" : ""}
-                  </span>
-                )}
               </div>
               <button
                 onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
                 className="text-faint hover:text-coral transition-colors p-1"
-                title="Close search (Esc)"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="w-4 h-4" />
               </button>
             </div>
-
-            {/* Search results list */}
-            {searchQuery.trim() && searchResults.length > 0 && (
-              <div className="mt-2 flex flex-col gap-1 max-h-52 overflow-y-auto">
-                {searchResults.map((result, i) => (
-                  <button
-                    key={result.anchor + i}
-                    onClick={() => { jumpToResult(result.anchor, result.heading); setSearchFocusIdx(i); }}
-                    className={`text-left px-3 py-2 rounded-lg transition-colors duration-150 border ${
-                      searchFocusIdx === i
-                        ? "bg-gold/10 border-gold/30 text-cream"
-                        : "bg-surface/50 border-edge/40 text-dust hover:bg-surface hover:text-cream hover:border-edge"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-faint shrink-0">H{result.level}</span>
-                      <span className="text-xs font-semibold font-mono truncate">{result.heading}</span>
-                      <span className="ml-auto text-[10px] font-mono text-faint shrink-0">{result.score} hit{result.score !== 1 ? "s" : ""}</span>
-                    </div>
-                    {result.snippet && (
-                      <p className="mt-0.5 text-[11px] text-faint line-clamp-1 font-body">{result.snippet}</p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {searchQuery.trim() && searchResults.length === 0 && (
-              <p className="mt-2 text-xs text-faint font-mono">No sections match &ldquo;{searchQuery}&rdquo;</p>
-            )}
           </div>
         )}
       </div>
 
-      {/* Meta card */}
       <div className="max-w-4xl mx-auto px-6 pt-8 pb-4">
         <div className="p-5 rounded-2xl bg-surface/60 border border-edge">
           <div className="flex flex-wrap gap-6">
@@ -416,99 +372,33 @@ function AnalysisOutput({
         </div>
       </div>
 
-      {/* Tab content */}
       <div className="max-w-4xl mx-auto px-6 pb-16">
-        {/* ═══ Report Tab ═══ */}
         {activeTab === "report" && (
           <>
-            {/* Streaming banner */}
             {isStreaming && (
               <div className="mb-4 p-4 rounded-xl bg-gold/5 border border-gold/20 flex items-center gap-3">
                 <div className="w-2 h-2 rounded-full bg-gold animate-pulse shrink-0" />
                 <div>
                   <p className="text-sm font-medium text-gold">Analysis in progress…</p>
-                  {phaseLabel(phase) && (
-                    <p className="text-xs text-gold/60 mt-0.5 font-mono">Step: {phaseLabel(phase)}</p>
-                  )}
-                  <p className="text-xs text-gold/40 mt-0.5 font-body italic">
-                    Partial results shown below — updates as more modules complete.
-                  </p>
+                  {phaseLabel(phase) && <p className="text-xs text-gold/60 mt-0.5 font-mono">Step: {phaseLabel(phase)}</p>}
                 </div>
               </div>
             )}
-
-            {/* Interrupted banner */}
-            {!complete && phase === "interrupted" && (
-              <div className="mb-4 p-4 rounded-xl bg-coral/10 border border-coral/20 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-coral text-lg">⚠</span>
-                  <div>
-                    <p className="text-sm font-medium text-coral">Response is incomplete</p>
-                    <p className="text-xs text-coral/60 mt-0.5 font-body italic">
-                      Connection was interrupted. Partial results shown below.
-                    </p>
-                  </div>
-                </div>
-                {onRetry && (
-                  <button
-                    onClick={onRetry}
-                    className="shrink-0 text-xs px-4 py-2 rounded-lg bg-coral text-midnight font-semibold hover:bg-coral/90 transition-colors"
-                  >
-                    Retry Full Analysis
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Rendered markdown */}
             <article ref={articleRef} className="prose-custom prose prose-invert prose-sm max-w-none p-8 sm:p-10 rounded-2xl bg-panel/50 border border-edge">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {markdown}
-              </ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
             </article>
           </>
         )}
 
-        {/* ═══ Metrics Tab ═══ */}
-        {activeTab === "metrics" && fileData && fileData.length > 0 && (
-          <div className="py-4">
-            <MetricsDashboard files={fileData} />
-          </div>
-        )}
+        {activeTab === "metrics" && fileData && <MetricsDashboard files={fileData} />}
+        {activeTab === "graph" && <DependencyGraph markdown={markdown} filePaths={filePaths} modules={moduleChunks} />}
+        {activeTab === "graphify" && resolvedGraphifyData && <GraphifyVisualizer graphData={resolvedGraphifyData} />}
+        {activeTab === "security" && resolvedSecurityReport && <SecurityRadar report={resolvedSecurityReport} />}
+        {activeTab === 'testing' && resolvedTestReport && <TestIQDashboard report={resolvedTestReport} />}
+        {activeTab === 'arch' && archReport && <ArchLensDashboard report={archReport} />}
+        {activeTab === 'api' && apiReport && <RouteMapDashboard report={apiReport} />}
+        {activeTab === 'team' && teamReport && <TeamPulseDashboard report={teamReport} />}
 
-        {/* ═══ Graph Tab ═══ */}
-        {activeTab === "graph" && (
-          <div className="py-4">
-            <DependencyGraph
-              markdown={markdown}
-              filePaths={filePaths}
-              modules={moduleChunks}
-            />
-          </div>
-        )}
-
-        {/* ═══ Graphify Tab ═══ */}
-        {activeTab === "graphify" && resolvedGraphifyData && (
-          <div className="py-4">
-            <GraphifyVisualizer graphData={resolvedGraphifyData} />
-          </div>
-        )}
-
-        {/* ═══ Security Tab ═══ */}
-        {activeTab === "security" && resolvedSecurityReport && (
-          <div className="py-4">
-            <SecurityRadar report={resolvedSecurityReport} />
-          </div>
-        )}
-
-        {/* ═══ Testing Tab ═══ */}
-        {activeTab === "test" && resolvedTestReport && (
-          <div className="py-4">
-            <TestIQDashboard report={resolvedTestReport} />
-          </div>
-        )}
-
-        {/* Bottom actions */}
         <div className="flex flex-wrap items-center justify-between gap-4 mt-6 pt-6 border-t border-edge/40">
           <button
             onClick={onReset}

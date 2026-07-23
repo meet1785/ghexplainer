@@ -60,10 +60,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       markdown: result.markdown,
       repoInfo: result.repoInfo,
-      filesAnalyzed: result.filesAnalyzed,
       chunks: result.chunks,
       durationMs: result.durationMs,
       cached: result.cached,
+      graphifyData: result.graphifyData,
+      securityReport: result.securityReport,
+      testReport: result.testReport,
+      archReport: result.archReport,
+      apiReport: result.apiReport,
+      teamReport: result.teamReport,
     });
   } catch (e) {
     const message = (e as Error).message ?? "Unknown error";

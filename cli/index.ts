@@ -9,6 +9,9 @@ import { analyzeRepo } from "../lib/analyzer";
 import { buildGraphifyGraph, toMermaidDiagram, toGraphJSON } from "../lib/graphify";
 import { auditRepositorySecurity, toSecurityMarkdown, toSecurityJSON } from "../lib/security";
 import { toTestIQMarkdown, toTestIQJSON } from "../lib/testing";
+import { toArchLensMarkdown, toArchLensJSON } from "../lib/archlens";
+import { toRouteMapMarkdown, toRouteMapJSON } from "../lib/routemap";
+import { toTeamPulseMarkdown, toTeamPulseJSON } from "../lib/teampulse";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -45,7 +48,10 @@ program
   .option("-g, --graphify [format]", "Export Graphify knowledge graph (mermaid or json, default: mermaid)")
   .option("-s, --security [format]", "Export Security Radar audit report (markdown or json, default: markdown)")
   .option("-t, --tests [format]", "Export TestIQ health report (markdown or json, default: markdown)")
-  .action(async (url: string, opts: { output?: string; githubToken?: string; geminiKey?: string; noCache?: boolean; graphify?: string | boolean; security?: string | boolean; tests?: string | boolean }) => {
+  .option("-a, --arch [format]", "Export ArchLens dependencies report (markdown or json, default: markdown)")
+  .option("-r, --api [format]", "Export RouteMap API endpoints report (markdown or json, default: markdown)")
+  .option("-p, --team [format]", "Export TeamPulse analytics report (markdown or json, default: markdown)")
+  .action(async (url: string, opts: { output?: string; githubToken?: string; geminiKey?: string; noCache?: boolean; graphify?: string | boolean; security?: string | boolean; tests?: string | boolean; arch?: string | boolean; api?: string | boolean; team?: string | boolean }) => {
     console.log("\n🔍 ghexplainer — analyzing:", url);
     console.log("─".repeat(60));
 
@@ -179,6 +185,99 @@ program
               const mdPath = opts.output.replace(/\.md$/, "") + "-testiq.md";
               fs.writeFileSync(path.resolve(mdPath), mdOutput, "utf-8");
               console.log(`📄 TestIQ Markdown saved to: ${path.resolve(mdPath)}\n`);
+            } else {
+              console.log(mdOutput);
+            }
+          }
+        }
+      }
+
+      // ArchLens export
+      if (opts.arch) {
+        const archReport = result.archReport;
+        if (archReport) {
+          const format = typeof opts.arch === "string" ? opts.arch : "markdown";
+          console.log("\n" + "─".repeat(60));
+          console.log(`🏗️  ArchLens Dependencies Audit — Score: ${archReport.score}/100`);
+          console.log("─".repeat(60) + "\n");
+
+          if (format === "json") {
+            const jsonOutput = toArchLensJSON(archReport);
+            if (opts.output) {
+              const jsonPath = opts.output.replace(/\.md$/, "") + "-archlens.json";
+              fs.writeFileSync(path.resolve(jsonPath), jsonOutput, "utf-8");
+              console.log(`📄 ArchLens JSON saved to: ${path.resolve(jsonPath)}\n`);
+            } else {
+              console.log(jsonOutput);
+            }
+          } else {
+            const mdOutput = toArchLensMarkdown(archReport);
+            if (opts.output) {
+              const mdPath = opts.output.replace(/\.md$/, "") + "-archlens.md";
+              fs.writeFileSync(path.resolve(mdPath), mdOutput, "utf-8");
+              console.log(`📄 ArchLens Markdown saved to: ${path.resolve(mdPath)}\n`);
+            } else {
+              console.log(mdOutput);
+            }
+          }
+        }
+      }
+
+      // RouteMap export
+      if (opts.api) {
+        const apiReport = result.apiReport;
+        if (apiReport) {
+          const format = typeof opts.api === "string" ? opts.api : "markdown";
+          console.log("\n" + "─".repeat(60));
+          console.log(`🛣️  RouteMap API Discoverer — ${apiReport.totalRoutes} routes found`);
+          console.log("─".repeat(60) + "\n");
+
+          if (format === "json") {
+            const jsonOutput = toRouteMapJSON(apiReport);
+            if (opts.output) {
+              const jsonPath = opts.output.replace(/\.md$/, "") + "-routemap.json";
+              fs.writeFileSync(path.resolve(jsonPath), jsonOutput, "utf-8");
+              console.log(`📄 RouteMap JSON saved to: ${path.resolve(jsonPath)}\n`);
+            } else {
+              console.log(jsonOutput);
+            }
+          } else {
+            const mdOutput = toRouteMapMarkdown(apiReport);
+            if (opts.output) {
+              const mdPath = opts.output.replace(/\.md$/, "") + "-routemap.md";
+              fs.writeFileSync(path.resolve(mdPath), mdOutput, "utf-8");
+              console.log(`📄 RouteMap Markdown saved to: ${path.resolve(mdPath)}\n`);
+            } else {
+              console.log(mdOutput);
+            }
+          }
+        }
+      }
+
+      // TeamPulse export
+      if (opts.team) {
+        const teamReport = result.teamReport;
+        if (teamReport) {
+          const format = typeof opts.team === "string" ? opts.team : "markdown";
+          console.log("\n" + "─".repeat(60));
+          console.log(`👥 TeamPulse Analytics — Score: ${teamReport.score}/100`);
+          console.log("─".repeat(60) + "\n");
+
+          if (format === "json") {
+            const jsonOutput = toTeamPulseJSON(teamReport);
+            if (opts.output) {
+              const jsonPath = opts.output.replace(/\.md$/, "") + "-teampulse.json";
+              fs.writeFileSync(path.resolve(jsonPath), jsonOutput, "utf-8");
+              console.log(`📄 TeamPulse JSON saved to: ${path.resolve(jsonPath)}\n`);
+            } else {
+              console.log(jsonOutput);
+            }
+          } else {
+            const mdOutput = toTeamPulseMarkdown(teamReport);
+            if (opts.output) {
+              const mdPath = opts.output.replace(/\.md$/, "") + "-teampulse.md";
+              fs.writeFileSync(path.resolve(mdPath), mdOutput, "utf-8");
+              console.log(`📄 TeamPulse Markdown saved to: ${path.resolve(mdPath)}\n`);
             } else {
               console.log(mdOutput);
             }

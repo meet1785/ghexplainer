@@ -15,6 +15,22 @@ export interface RepoInfo {
   updatedAt: string;
 }
 
+export interface RepoCommit {
+  sha: string;
+  authorName: string;
+  authorEmail: string;
+  date: string;
+  message: string;
+}
+
+export interface RepoResult {
+  owner: string;
+  repo: string;
+  files: FileContent[];
+  commits: RepoCommit[];
+  sizeBytes: number;
+}
+
 export interface TreeFile {
   path: string;
   type: "blob" | "tree";
@@ -480,6 +496,36 @@ function buildHeaders(token?: string): Record<string, string> {
   const t = token ?? process.env.GITHUB_TOKEN;
   if (t) headers["Authorization"] = `Bearer ${t}`;
   return headers;
+}
+
+// ─── Commits API functions ─────────────────────────────────────────
+
+/**
+ * Fetch the latest 100 commits for a repository.
+ */
+export async function fetchRepoCommits(
+  owner: string,
+  repo: string,
+  token?: string
+): Promise<RepoCommit[]> {
+  const headers = buildHeaders(token);
+  const encodedOwner = encodeURIComponent(owner);
+  const encodedRepo = encodeURIComponent(repo);
+  const res = await fetch(
+    `https://api.github.com/repos/${encodedOwner}/${encodedRepo}/commits?per_page=100`,
+    { headers }
+  );
+  if (!res.ok) {
+    return [];
+  }
+  const data = await res.json();
+  return (data as any[]).map((c) => ({
+    sha: c.sha,
+    authorName: c.commit.author.name,
+    authorEmail: c.commit.author.email,
+    date: c.commit.author.date,
+    message: c.commit.message,
+  }));
 }
 
 // ─── PR API functions ─────────────────────────────────────────

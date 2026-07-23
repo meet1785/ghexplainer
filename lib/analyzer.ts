@@ -24,6 +24,10 @@ import { analysisCache } from "./cache";
 import { buildGraphifyGraph, type GraphifyResult } from "./graphify";
 import { auditRepositorySecurity, type SecurityReport } from "./security";
 import { analyzeTestingHealth, type TestIQReport } from "./testing";
+import { auditArchLens, type ArchLensReport } from "./archlens";
+import { discoverRouteMap, type RouteMapReport } from "./routemap";
+import { analyzeTeamPulse, type TeamPulseReport } from "./teampulse";
+import { fetchRepoCommits } from "./github";
 
 export interface AnalysisResult {
   repoInfo: RepoInfo;
@@ -39,6 +43,12 @@ export interface AnalysisResult {
   securityReport?: SecurityReport;
   /** Testing health and coverage analyzer report */
   testReport?: TestIQReport;
+  /** Architecture and dependency audit */
+  archReport?: ArchLensReport;
+  /** API endpoint discovery */
+  apiReport?: RouteMapReport;
+  /** Contributor and churn analytics */
+  teamReport?: TeamPulseReport;
 }
 
 export interface AnalysisOptions {
@@ -105,6 +115,9 @@ export async function analyzeRepo(
     treeRef
   );
 
+  notify(`Fetching commit history for ${owner}/${repo}…`);
+  const commits = await fetchRepoCommits(owner, repo, githubToken);
+
   // Step 5: Smart Code Chunking
   notify("Chunking code by module…");
   const chunks: CodeChunk[] = chunkByModule(files);
@@ -121,6 +134,15 @@ export async function analyzeRepo(
   notify("Analyzing testing health and code coverage…");
   const testReport = analyzeTestingHealth(files);
   notify(`Testing health complete: Score ${testReport.score}/100, ${testReport.untestedSourceFiles.length} untested modules`);
+
+  notify("Auditing architecture and dependencies (ArchLens)…");
+  const archReport = auditArchLens(files);
+  
+  notify("Discovering API endpoints (RouteMap)…");
+  const apiReport = discoverRouteMap(files);
+
+  notify("Analyzing team dynamics and code churn (TeamPulse)…");
+  const teamReport = analyzeTeamPulse(commits, files);
 
   // Step 6: Multi-pass Gemini analysis
   notify(
@@ -154,6 +176,9 @@ export async function analyzeRepo(
     graphifyData,
     securityReport,
     testReport,
+    archReport,
+    apiReport,
+    teamReport,
   };
 
   // Step 8: Cache the result
@@ -169,7 +194,7 @@ export async function analyzeRepo(
  */
 export type StreamEvent =
   | { type: "progress"; step: string }
-  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number; filePaths?: string[]; moduleChunks?: Array<{ module: string; files: Array<{ path: string; content: string }>; totalChars: number; dependencies: string[] }>; fileData?: Array<{ path: string; content: string }>; graphifyData?: GraphifyResult; securityReport?: SecurityReport; testReport?: TestIQReport }
+  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number; filePaths?: string[]; moduleChunks?: Array<{ module: string; files: Array<{ path: string; content: string }>; totalChars: number; dependencies: string[] }>; fileData?: Array<{ path: string; content: string }>; graphifyData?: GraphifyResult; securityReport?: SecurityReport; testReport?: TestIQReport; archReport?: ArchLensReport; apiReport?: RouteMapReport; teamReport?: TeamPulseReport }
   | { type: "partial"; markdown: string; phase: string; complete: boolean }
   | { type: "done"; markdown: string; durationMs: number; cached: boolean }
   | { type: "error"; message: string };
@@ -216,15 +241,20 @@ export async function* analyzeRepoStream(
   yield { type: "progress", step: `Reading ${readable.length} source files…` };
   const files: FileContent[] = await fetchSelectedFiles(owner, repo, readable, githubToken, treeRef);
 
+  yield { type: "progress", step: `Fetching commit history…` };
+  const commits = await fetchRepoCommits(owner, repo, githubToken);
+
   // Step 5: Chunk
   yield { type: "progress", step: "Chunking code by module…" };
   const chunks: CodeChunk[] = chunkByModule(files);
 
-  // Step 5.5: Build Graphify knowledge graph & Security Audit & Testing Audit
-  yield { type: "progress", step: "Building Graphify knowledge graph & auditing security & testing health…" };
+  yield { type: "progress", step: "Building knowledge graph & running audits (Security, TestIQ, ArchLens, RouteMap, TeamPulse)…" };
   const graphifyData = buildGraphifyGraph(files);
   const securityReport = auditRepositorySecurity(files);
   const testReport = analyzeTestingHealth(files);
+  const archReport = auditArchLens(files);
+  const apiReport = discoverRouteMap(files);
+  const teamReport = analyzeTeamPulse(commits, files);
 
   // Send metadata + file data for metrics/graph features
   const filePaths = tree.filter(f => f.type === "blob").map(f => f.path);
@@ -245,6 +275,9 @@ export async function* analyzeRepoStream(
     graphifyData,
     securityReport,
     testReport,
+    archReport,
+    apiReport,
+    teamReport,
   };
 
   // Step 6: Stream Gemini analysis — yields partial markdown after each call
@@ -273,6 +306,9 @@ export async function* analyzeRepoStream(
     graphifyData,
     securityReport,
     testReport,
+    archReport,
+    apiReport,
+    teamReport,
   };
   analysisCache.set(cacheKey, result);
 

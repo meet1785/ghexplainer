@@ -16,6 +16,9 @@ import type { RepoInfo } from "@/lib/github";
 import type { GraphifyResult } from "@/lib/graphify";
 import type { SecurityReport } from "@/lib/security";
 import type { TestIQReport } from "@/lib/testing";
+import type { ArchLensReport } from "@/lib/archlens";
+import type { RouteMapReport } from "@/lib/routemap";
+import type { TeamPulseReport } from "@/lib/teampulse";
 import { buildShareUrl, parseRepoFromSearchParams } from "@/lib/share";
 
 type AppState = "idle" | "loading" | "done" | "error";
@@ -42,6 +45,9 @@ interface AnalysisData {
   graphifyData?: GraphifyResult;
   securityReport?: SecurityReport;
   testReport?: TestIQReport;
+  archReport?: ArchLensReport;
+  apiReport?: RouteMapReport;
+  teamReport?: TeamPulseReport;
 }
 
 const HOW_IT_WORKS = [
@@ -245,6 +251,9 @@ export default function Home() {
     let graphifyData: GraphifyResult | undefined;
     let securityReport: SecurityReport | undefined;
     let testReport: TestIQReport | undefined;
+    let archReport: ArchLensReport | undefined;
+    let apiReport: RouteMapReport | undefined;
+    let teamReport: TeamPulseReport | undefined;
 
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
@@ -299,6 +308,9 @@ export default function Home() {
               graphifyData = event.graphifyData;
               securityReport = event.securityReport;
               testReport = event.testReport;
+              archReport = event.archReport;
+              apiReport = event.apiReport;
+              teamReport = event.teamReport;
               break;
             case "partial":
               partialMarkdown = event.markdown ?? "";
@@ -320,6 +332,9 @@ export default function Home() {
                   graphifyData,
                   securityReport,
                   testReport,
+                  archReport,
+                  apiReport,
+                  teamReport,
                 };
                 setResult(partialData);
                 saveToHistory(partialData, url);
@@ -343,6 +358,9 @@ export default function Home() {
                   graphifyData,
                   securityReport,
                   testReport,
+                  archReport,
+                  apiReport,
+                  teamReport,
                 };
                 setResult(updatedData);
                 saveToHistory(updatedData, url);
@@ -367,6 +385,9 @@ export default function Home() {
                   graphifyData,
                   securityReport,
                   testReport,
+                  archReport,
+                  apiReport,
+                  teamReport,
                 };
                 setResult(doneData);
                 // Update the address bar so the current URL is shareable
@@ -409,6 +430,9 @@ export default function Home() {
           graphifyData,
           securityReport,
           testReport,
+          archReport,
+          apiReport,
+          teamReport,
         };
         setResult(partialData);
         saveToHistory(partialData, url);
@@ -642,6 +666,9 @@ export default function Home() {
             graphifyData={result.graphifyData}
             securityReport={result.securityReport}
             testReport={result.testReport}
+            archReport={result.archReport}
+            apiReport={result.apiReport}
+            teamReport={result.teamReport}
           />
         </div>
       )}
