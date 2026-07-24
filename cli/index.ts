@@ -51,7 +51,10 @@ program
   .option("-a, --arch [format]", "Export ArchLens dependencies report (markdown or json, default: markdown)")
   .option("-r, --api [format]", "Export RouteMap API endpoints report (markdown or json, default: markdown)")
   .option("-p, --team [format]", "Export TeamPulse analytics report (markdown or json, default: markdown)")
-  .action(async (url: string, opts: { output?: string; githubToken?: string; geminiKey?: string; noCache?: boolean; graphify?: string | boolean; security?: string | boolean; tests?: string | boolean; arch?: string | boolean; api?: string | boolean; team?: string | boolean }) => {
+  .option("-q, --quality", "Export CodeQuality report as JSON")
+  .option("-l, --license", "Export LicenseCompliance report as JSON")
+  .option("-d, --deploy", "Export DeployFlow report as JSON")
+  .action(async (url: string, opts: { output?: string; githubToken?: string; geminiKey?: string; noCache?: boolean; graphify?: string | boolean; security?: string | boolean; tests?: string | boolean; arch?: string | boolean; api?: string | boolean; team?: string | boolean; quality?: boolean; license?: boolean; deploy?: boolean }) => {
     console.log("\n🔍 ghexplainer — analyzing:", url);
     console.log("─".repeat(60));
 
@@ -283,6 +286,24 @@ program
             }
           }
         }
+      }
+
+      if (opts.quality && result.qualityReport) {
+        console.log("\n" + "─".repeat(60));
+        console.log(`🧹 CodeQuality — Score: ${result.qualityReport.score}/100`);
+        console.log(JSON.stringify(result.qualityReport, null, 2));
+      }
+
+      if (opts.license && result.licenseReport) {
+        console.log("\n" + "─".repeat(60));
+        console.log(`⚖️ LicenseCompliance — Score: ${result.licenseReport.score}/100`);
+        console.log(JSON.stringify(result.licenseReport, null, 2));
+      }
+
+      if (opts.deploy && result.deployReport) {
+        console.log("\n" + "─".repeat(60));
+        console.log(`🚀 DeployFlow — Score: ${result.deployReport.score}/100`);
+        console.log(JSON.stringify(result.deployReport, null, 2));
       }
     } catch (e) {
       console.error("\n❌ Error:", (e as Error).message);

@@ -19,6 +19,9 @@ import type { TestIQReport } from "@/lib/testing";
 import type { ArchLensReport } from "@/lib/archlens";
 import type { RouteMapReport } from "@/lib/routemap";
 import type { TeamPulseReport } from "@/lib/teampulse";
+import type { CodeQualityReport } from "@/lib/codequality";
+import type { LicenseReport } from "@/lib/license";
+import type { DeployFlowReport } from "@/lib/deployflow";
 import { buildShareUrl, parseRepoFromSearchParams } from "@/lib/share";
 
 type AppState = "idle" | "loading" | "done" | "error";
@@ -48,6 +51,9 @@ interface AnalysisData {
   archReport?: ArchLensReport;
   apiReport?: RouteMapReport;
   teamReport?: TeamPulseReport;
+  qualityReport?: CodeQualityReport;
+  licenseReport?: LicenseReport;
+  deployReport?: DeployFlowReport;
 }
 
 const HOW_IT_WORKS = [
@@ -254,6 +260,9 @@ export default function Home() {
     let archReport: ArchLensReport | undefined;
     let apiReport: RouteMapReport | undefined;
     let teamReport: TeamPulseReport | undefined;
+    let qualityReport: CodeQualityReport | undefined;
+    let licenseReport: LicenseReport | undefined;
+    let deployReport: DeployFlowReport | undefined;
 
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
 
@@ -311,6 +320,9 @@ export default function Home() {
               archReport = event.archReport;
               apiReport = event.apiReport;
               teamReport = event.teamReport;
+              qualityReport = event.qualityReport;
+              licenseReport = event.licenseReport;
+              deployReport = event.deployReport;
               break;
             case "partial":
               partialMarkdown = event.markdown ?? "";
@@ -335,6 +347,9 @@ export default function Home() {
                   archReport,
                   apiReport,
                   teamReport,
+                  qualityReport,
+                  licenseReport,
+                  deployReport,
                 };
                 setResult(partialData);
                 saveToHistory(partialData, url);
@@ -361,6 +376,9 @@ export default function Home() {
                   archReport,
                   apiReport,
                   teamReport,
+                  qualityReport,
+                  licenseReport,
+                  deployReport,
                 };
                 setResult(updatedData);
                 saveToHistory(updatedData, url);
@@ -388,6 +406,9 @@ export default function Home() {
                   archReport,
                   apiReport,
                   teamReport,
+                  qualityReport,
+                  licenseReport,
+                  deployReport,
                 };
                 setResult(doneData);
                 // Update the address bar so the current URL is shareable
@@ -669,6 +690,9 @@ export default function Home() {
             archReport={result.archReport}
             apiReport={result.apiReport}
             teamReport={result.teamReport}
+            qualityReport={result.qualityReport}
+            licenseReport={result.licenseReport}
+            deployReport={result.deployReport}
           />
         </div>
       )}

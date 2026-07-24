@@ -27,6 +27,9 @@ import { analyzeTestingHealth, type TestIQReport } from "./testing";
 import { auditArchLens, type ArchLensReport } from "./archlens";
 import { discoverRouteMap, type RouteMapReport } from "./routemap";
 import { analyzeTeamPulse, type TeamPulseReport } from "./teampulse";
+import { analyzeCodeQuality, type CodeQualityReport } from "./codequality";
+import { scanLicenses, type LicenseReport } from "./license";
+import { analyzeDeployFlow, type DeployFlowReport } from "./deployflow";
 import { fetchRepoCommits } from "./github";
 
 export interface AnalysisResult {
@@ -49,6 +52,12 @@ export interface AnalysisResult {
   apiReport?: RouteMapReport;
   /** Contributor and churn analytics */
   teamReport?: TeamPulseReport;
+  /** Code quality and smells */
+  qualityReport?: CodeQualityReport;
+  /** License and IP compliance */
+  licenseReport?: LicenseReport;
+  /** CI/CD and DevOps pipeline analysis */
+  deployReport?: DeployFlowReport;
 }
 
 export interface AnalysisOptions {
@@ -144,6 +153,15 @@ export async function analyzeRepo(
   notify("Analyzing team dynamics and code churn (TeamPulse)…");
   const teamReport = analyzeTeamPulse(commits, files);
 
+  notify("Analyzing code quality and code smells (CodeQuality)…");
+  const qualityReport = analyzeCodeQuality(files);
+
+  notify("Scanning licenses and IP compliance (LicenseCompliance)…");
+  const licenseReport = scanLicenses(files);
+
+  notify("Analyzing CI/CD pipelines (DeployFlow)…");
+  const deployReport = analyzeDeployFlow(files);
+
   // Step 6: Multi-pass Gemini analysis
   notify(
     `Sending ${chunks.length} chunks to Gemini for analysis… (this may take 20–60 seconds)`
@@ -179,6 +197,9 @@ export async function analyzeRepo(
     archReport,
     apiReport,
     teamReport,
+    qualityReport,
+    licenseReport,
+    deployReport,
   };
 
   // Step 8: Cache the result
@@ -194,7 +215,7 @@ export async function analyzeRepo(
  */
 export type StreamEvent =
   | { type: "progress"; step: string }
-  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number; filePaths?: string[]; moduleChunks?: Array<{ module: string; files: Array<{ path: string; content: string }>; totalChars: number; dependencies: string[] }>; fileData?: Array<{ path: string; content: string }>; graphifyData?: GraphifyResult; securityReport?: SecurityReport; testReport?: TestIQReport; archReport?: ArchLensReport; apiReport?: RouteMapReport; teamReport?: TeamPulseReport }
+  | { type: "meta"; repoInfo: RepoInfo; filesAnalyzed: number; chunks: number; filePaths?: string[]; moduleChunks?: Array<{ module: string; files: Array<{ path: string; content: string }>; totalChars: number; dependencies: string[] }>; fileData?: Array<{ path: string; content: string }>; graphifyData?: GraphifyResult; securityReport?: SecurityReport; testReport?: TestIQReport; archReport?: ArchLensReport; apiReport?: RouteMapReport; teamReport?: TeamPulseReport; qualityReport?: CodeQualityReport; licenseReport?: LicenseReport; deployReport?: DeployFlowReport }
   | { type: "partial"; markdown: string; phase: string; complete: boolean }
   | { type: "done"; markdown: string; durationMs: number; cached: boolean }
   | { type: "error"; message: string };
@@ -248,13 +269,16 @@ export async function* analyzeRepoStream(
   yield { type: "progress", step: "Chunking code by module…" };
   const chunks: CodeChunk[] = chunkByModule(files);
 
-  yield { type: "progress", step: "Building knowledge graph & running audits (Security, TestIQ, ArchLens, RouteMap, TeamPulse)…" };
+  yield { type: "progress", step: "Building knowledge graph & running audits (Security, TestIQ, ArchLens, RouteMap, TeamPulse, CodeQuality, License, DeployFlow)…" };
   const graphifyData = buildGraphifyGraph(files);
   const securityReport = auditRepositorySecurity(files);
   const testReport = analyzeTestingHealth(files);
   const archReport = auditArchLens(files);
   const apiReport = discoverRouteMap(files);
   const teamReport = analyzeTeamPulse(commits, files);
+  const qualityReport = analyzeCodeQuality(files);
+  const licenseReport = scanLicenses(files);
+  const deployReport = analyzeDeployFlow(files);
 
   // Send metadata + file data for metrics/graph features
   const filePaths = tree.filter(f => f.type === "blob").map(f => f.path);
@@ -278,6 +302,9 @@ export async function* analyzeRepoStream(
     archReport,
     apiReport,
     teamReport,
+    qualityReport,
+    licenseReport,
+    deployReport,
   };
 
   // Step 6: Stream Gemini analysis — yields partial markdown after each call
@@ -309,6 +336,9 @@ export async function* analyzeRepoStream(
     archReport,
     apiReport,
     teamReport,
+    qualityReport,
+    licenseReport,
+    deployReport,
   };
   analysisCache.set(cacheKey, result);
 

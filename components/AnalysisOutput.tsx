@@ -14,6 +14,9 @@ import { analyzeTestingHealth } from "@/lib/testing";
 import type { ArchLensReport } from "@/lib/archlens";
 import type { RouteMapReport } from "@/lib/routemap";
 import type { TeamPulseReport } from "@/lib/teampulse";
+import type { CodeQualityReport } from "@/lib/codequality";
+import type { LicenseReport } from "@/lib/license";
+import type { DeployFlowReport } from "@/lib/deployflow";
 import DependencyGraph from "./DependencyGraph";
 import GraphifyVisualizer from "./GraphifyVisualizer";
 import SecurityRadar from "./SecurityRadar";
@@ -22,6 +25,9 @@ import MetricsDashboard from "./MetricsDashboard";
 import { ArchLensDashboard } from "./ArchLensDashboard";
 import { RouteMapDashboard } from "./RouteMapDashboard";
 import { TeamPulseDashboard } from "./TeamPulseDashboard";
+import { CodeQualityDashboard } from "./CodeQualityDashboard";
+import { LicenseDashboard } from "./LicenseDashboard";
+import { DeployFlowDashboard } from "./DeployFlowDashboard";
 import TableOfContents from "./TableOfContents";
 import { computeProjectMetrics } from "@/lib/metrics";
 import { formatDuration } from "@/lib/format";
@@ -58,9 +64,12 @@ interface AnalysisOutputProps {
   archReport?: ArchLensReport;
   apiReport?: RouteMapReport;
   teamReport?: TeamPulseReport;
+  qualityReport?: CodeQualityReport;
+  licenseReport?: LicenseReport;
+  deployReport?: DeployFlowReport;
 }
 
-type TabType = 'report' | 'metrics' | 'graph' | 'graphify' | 'security' | 'testing' | 'arch' | 'api' | 'team';
+type TabType = 'report' | 'metrics' | 'graph' | 'graphify' | 'security' | 'testing' | 'arch' | 'api' | 'team' | 'quality' | 'license' | 'deploy';
 
 function phaseLabel(phase: string): string {
   if (!phase || phase === "complete") return "";
@@ -110,6 +119,9 @@ function AnalysisOutput({
   archReport,
   apiReport,
   teamReport,
+  qualityReport,
+  licenseReport,
+  deployReport,
 }: AnalysisOutputProps) {
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>("report");
@@ -305,6 +317,9 @@ function AnalysisOutput({
             <TabButton id="arch" icon={Layers} label="ArchLens" count={archReport?.totalDependencies} active={activeTab === 'arch'} disabled={!archReport} onClick={() => setActiveTab('arch')} />
             <TabButton id="api" icon={Webhook} label="RouteMap" count={apiReport?.totalRoutes} active={activeTab === 'api'} disabled={!apiReport} onClick={() => setActiveTab('api')} />
             <TabButton id="team" icon={Users} label="TeamPulse" active={activeTab === 'team'} disabled={!teamReport} onClick={() => setActiveTab('team')} />
+            <TabButton id="quality" icon={FileText} label="CodeQuality" active={activeTab === 'quality'} disabled={!qualityReport} onClick={() => setActiveTab('quality')} />
+            <TabButton id="license" icon={Shield} label="License" active={activeTab === 'license'} disabled={!licenseReport} onClick={() => setActiveTab('license')} />
+            <TabButton id="deploy" icon={Terminal} label="DeployFlow" active={activeTab === 'deploy'} disabled={!deployReport} onClick={() => setActiveTab('deploy')} />
           </div>
           {activeTab === "report" && (
             <button
@@ -398,6 +413,9 @@ function AnalysisOutput({
         {activeTab === 'arch' && archReport && <ArchLensDashboard report={archReport} />}
         {activeTab === 'api' && apiReport && <RouteMapDashboard report={apiReport} />}
         {activeTab === 'team' && teamReport && <TeamPulseDashboard report={teamReport} />}
+        {activeTab === 'quality' && qualityReport && <CodeQualityDashboard report={qualityReport} />}
+        {activeTab === 'license' && licenseReport && <LicenseDashboard report={licenseReport} />}
+        {activeTab === 'deploy' && deployReport && <DeployFlowDashboard report={deployReport} />}
 
         <div className="flex flex-wrap items-center justify-between gap-4 mt-6 pt-6 border-t border-edge/40">
           <button
