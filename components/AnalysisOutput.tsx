@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { FileText, Download, Copy, Terminal, ExternalLink, RefreshCw, Layout, Menu, Share2, Search, X, MessageSquare, Code, Shield, Beaker, Layers, Webhook, Users } from "lucide-react";
+import { FileText, Download, Copy, Terminal, ExternalLink, RefreshCw, Layout, Menu, Share2, Search, X, MessageSquare, Code, Shield, Beaker, Layers, Webhook, Users, Bookmark, BookmarkCheck } from "lucide-react";
 import type { RepoInfo } from "@/lib/github";
 import type { GraphifyResult } from "@/lib/graphify";
 import type { SecurityReport } from "@/lib/security";
@@ -32,6 +32,11 @@ import TableOfContents from "./TableOfContents";
 import { computeProjectMetrics } from "@/lib/metrics";
 import { formatDuration } from "@/lib/format";
 import { searchSections, countTotalMatches } from "@/lib/search";
+import { estimateReadingTime, computeComplexityScore, complexityLabel } from "@/lib/readability";
+import { generateTLDR } from "@/lib/summary";
+import { getBookmarks, toggleBookmark, type SectionBookmark } from "@/lib/bookmarks";
+import { generateAnchor } from "@/lib/search";
+import { TLDRCard } from "./TLDRCard";
 
 interface AnalysisOutputProps {
   markdown: string;
@@ -69,7 +74,7 @@ interface AnalysisOutputProps {
   deployReport?: DeployFlowReport;
 }
 
-type TabType = 'report' | 'metrics' | 'graph' | 'graphify' | 'security' | 'testing' | 'arch' | 'api' | 'team' | 'quality' | 'license' | 'deploy';
+type TabType = 'report' | 'metrics' | 'graph' | 'graphify' | 'security' | 'testing' | 'arch' | 'api' | 'team' | 'quality' | 'license' | 'deploy' | 'bookmarks';
 
 function phaseLabel(phase: string): string {
   if (!phase || phase === "complete") return "";
@@ -128,14 +133,33 @@ function AnalysisOutput({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusIdx, setSearchFocusIdx] = useState(0);
+  const [bookmarks, setBookmarks] = useState<SectionBookmark[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = !complete && phase !== "complete";
   const articleRef = useRef<HTMLElement>(null);
+  const repoSlug = `${repoInfo.owner}/${repoInfo.repo}`;
 
   const healthScore = useMemo(() => {
     if (!fileData || fileData.length === 0) return null;
     return computeProjectMetrics(fileData).healthScore;
   }, [fileData]);
+
+  // Reading time and complexity computed from the markdown
+  const readingTimeMin = useMemo(() => estimateReadingTime(markdown), [markdown]);
+  const complexityScore = useMemo(() => computeComplexityScore(markdown), [markdown]);
+
+  // TL;DR summary generated client-side from the markdown
+  const tldrSummary = useMemo(() => generateTLDR(markdown, complete), [markdown, complete]);
+
+  // Load bookmarks from localStorage on mount and when repo changes
+  useEffect(() => {
+    setBookmarks(getBookmarks(repoSlug));
+  }, [repoSlug]);
+
+  const handleToggleBookmark = useCallback((anchor: string, heading: string) => {
+    toggleBookmark(repoSlug, anchor, heading);
+    setBookmarks(getBookmarks(repoSlug));
+  }, [repoSlug]);
 
   const resolvedGraphifyData = useMemo(() => {
     if (graphifyData) return graphifyData;
@@ -265,6 +289,25 @@ function AnalysisOutput({
             <span>· {filesAnalyzed} files</span>
             <span>· {chunks} chunks</span>
             {durationMs > 0 && <span>· {formatDuration(durationMs)}</span>}
+            {/* Reading time badge */}
+            <span
+              className="px-2 py-0.5 rounded font-mono text-[10px] font-semibold bg-azure/5 text-azure/70 border border-azure/20"
+              title="Estimated reading time"
+            >
+              ⏱ {readingTimeMin} min read
+            </span>
+            {/* Complexity badge */}
+            <span
+              className="px-2 py-0.5 rounded font-mono text-[10px] font-semibold"
+              style={{
+                color: complexityScore >= 60 ? "#e06070" : complexityScore >= 35 ? "#f0a040" : "#40c0a0",
+                backgroundColor: complexityScore >= 60 ? "#e0607008" : complexityScore >= 35 ? "#f0a04008" : "#40c0a008",
+                border: `1px solid ${complexityScore >= 60 ? "#e0607030" : complexityScore >= 35 ? "#f0a04030" : "#40c0a030"}`,
+              }}
+              title={`Complexity: ${complexityScore}/100`}
+            >
+              ◈ {complexityLabel(complexityScore)}
+            </span>
             {healthScore !== null && (
               <span
                 className="px-2 py-0.5 rounded font-mono text-[10px] font-semibold"
@@ -320,6 +363,7 @@ function AnalysisOutput({
             <TabButton id="quality" icon={FileText} label="CodeQuality" active={activeTab === 'quality'} disabled={!qualityReport} onClick={() => setActiveTab('quality')} />
             <TabButton id="license" icon={Shield} label="License" active={activeTab === 'license'} disabled={!licenseReport} onClick={() => setActiveTab('license')} />
             <TabButton id="deploy" icon={Terminal} label="DeployFlow" active={activeTab === 'deploy'} disabled={!deployReport} onClick={() => setActiveTab('deploy')} />
+            <TabButton id="bookmarks" icon={bookmarks.length > 0 ? BookmarkCheck : Bookmark} label="Bookmarks" count={bookmarks.length} active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} />
           </div>
           {activeTab === "report" && (
             <button
@@ -399,6 +443,10 @@ function AnalysisOutput({
                 </div>
               </div>
             )}
+            {/* TL;DR Summary Card — shown once streaming completes */}
+            {complete && tldrSummary.bullets.length > 0 && (
+              <TLDRCard summary={tldrSummary} repoSlug={repoSlug} />
+            )}
             <article ref={articleRef} className="prose-custom prose prose-invert prose-sm max-w-none p-8 sm:p-10 rounded-2xl bg-panel/50 border border-edge">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
             </article>
@@ -416,6 +464,70 @@ function AnalysisOutput({
         {activeTab === 'quality' && qualityReport && <CodeQualityDashboard report={qualityReport} />}
         {activeTab === 'license' && licenseReport && <LicenseDashboard report={licenseReport} />}
         {activeTab === 'deploy' && deployReport && <DeployFlowDashboard report={deployReport} />}
+
+        {/* Bookmarks Panel */}
+        {activeTab === 'bookmarks' && (
+          <div className="rounded-2xl bg-panel/50 border border-edge p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="font-mono text-sm font-semibold text-cream">Section Bookmarks</h2>
+                <p className="text-xs text-dust mt-1 font-body">Saved sections for {repoInfo.owner}/{repoInfo.repo}</p>
+              </div>
+              {bookmarks.length > 0 && (
+                <button
+                  onClick={() => {
+                    import("@/lib/bookmarks").then(({ clearBookmarks }) => {
+                      clearBookmarks(repoSlug);
+                      setBookmarks([]);
+                    });
+                  }}
+                  className="text-xs text-coral/60 hover:text-coral font-mono transition-colors"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+
+            {bookmarks.length === 0 ? (
+              <div className="text-center py-12">
+                <Bookmark className="w-8 h-8 text-faint/30 mx-auto mb-3" />
+                <p className="text-dust text-sm font-body">No bookmarks yet.</p>
+                <p className="text-faint text-xs mt-1 font-mono">Headings in the Report tab will have a bookmark button on hover.</p>
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {bookmarks.map((bm) => (
+                  <li
+                    key={bm.anchor}
+                    className="flex items-center justify-between gap-4 p-3 rounded-xl bg-surface/60 border border-edge hover:border-gold/20 transition-colors group"
+                  >
+                    <button
+                      onClick={() => {
+                        setActiveTab('report');
+                        setTimeout(() => {
+                          const el = document.getElementById(bm.anchor) ||
+                            articleRef.current?.querySelector(`[id="${bm.anchor}"]`);
+                          el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 100);
+                      }}
+                      className="flex items-center gap-3 text-left flex-1 min-w-0"
+                    >
+                      <BookmarkCheck className="w-3.5 h-3.5 text-gold shrink-0" />
+                      <span className="font-body text-sm text-cream truncate">{bm.heading}</span>
+                    </button>
+                    <button
+                      onClick={() => handleToggleBookmark(bm.anchor, bm.heading)}
+                      className="text-faint hover:text-coral transition-colors p-1 opacity-0 group-hover:opacity-100"
+                      title="Remove bookmark"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-4 mt-6 pt-6 border-t border-edge/40">
           <button
