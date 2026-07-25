@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import CodeBlock from "./CodeBlock";
 
 /**
  * AI Follow-up Chat Panel
@@ -263,7 +264,10 @@ function ChatPanel({ analysisMarkdown, repoSlug, isOpen, onToggle }: ChatPanelPr
             >
               {msg.role === "assistant" ? (
                 <div className="prose-chat">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    components={{ code: CodeBlock as any }}
+                  >
                     {msg.content || (msg.streaming ? "Thinking…" : "")}
                   </ReactMarkdown>
                   {msg.streaming && msg.content && (

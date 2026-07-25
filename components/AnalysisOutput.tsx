@@ -37,6 +37,10 @@ import { generateTLDR } from "@/lib/summary";
 import { getBookmarks, toggleBookmark, type SectionBookmark } from "@/lib/bookmarks";
 import { generateAnchor } from "@/lib/search";
 import { TLDRCard } from "./TLDRCard";
+import ExportMenu from "./ExportMenu";
+import CodeBlock from "./CodeBlock";
+import FileTree from "./FileTree";
+import { buildFileTree } from "@/lib/tree-builder";
 
 interface AnalysisOutputProps {
   markdown: string;
@@ -74,7 +78,7 @@ interface AnalysisOutputProps {
   deployReport?: DeployFlowReport;
 }
 
-type TabType = 'report' | 'metrics' | 'graph' | 'graphify' | 'security' | 'testing' | 'arch' | 'api' | 'team' | 'quality' | 'license' | 'deploy' | 'bookmarks';
+type TabType = 'report' | 'metrics' | 'graph' | 'graphify' | 'security' | 'testing' | 'arch' | 'api' | 'team' | 'quality' | 'license' | 'deploy' | 'bookmarks' | 'files';
 
 function phaseLabel(phase: string): string {
   if (!phase || phase === "complete") return "";
@@ -230,18 +234,7 @@ function AnalysisOutput({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDownloadMarkdown = () => {
-    const blob = new Blob([markdown], { type: "text/markdown" });
-    downloadBlob(blob, `${repoInfo.repo}-analysis.md`);
-  };
 
-  const handleDownloadHTML = () => {
-    import("@/lib/export").then(({ markdownToHtml }) => {
-      const html = markdownToHtml(markdown, `${repoInfo.owner}/${repoInfo.repo}`);
-      const blob = new Blob([html], { type: "text/html" });
-      downloadBlob(blob, `${repoInfo.repo}-analysis.html`);
-    });
-  };
 
   return (
     <div className="w-full">
@@ -334,18 +327,7 @@ function AnalysisOutput({
             >
               {copied ? "✓ Copied" : "Copy"}
             </button>
-            <button
-              onClick={handleDownloadMarkdown}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gold text-midnight font-semibold hover:bg-gold-bright transition-colors shadow-sm"
-            >
-              .md
-            </button>
-            <button
-              onClick={handleDownloadHTML}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-jade/80 text-midnight font-semibold hover:bg-jade transition-colors shadow-sm"
-            >
-              .html
-            </button>
+            <ExportMenu markdown={markdown} repoSlug={repoSlug} />
           </div>
         </div>
 
@@ -363,6 +345,7 @@ function AnalysisOutput({
             <TabButton id="quality" icon={FileText} label="CodeQuality" active={activeTab === 'quality'} disabled={!qualityReport} onClick={() => setActiveTab('quality')} />
             <TabButton id="license" icon={Shield} label="License" active={activeTab === 'license'} disabled={!licenseReport} onClick={() => setActiveTab('license')} />
             <TabButton id="deploy" icon={Terminal} label="DeployFlow" active={activeTab === 'deploy'} disabled={!deployReport} onClick={() => setActiveTab('deploy')} />
+            <TabButton id="files" icon={FileText} label="Files" active={activeTab === 'files'} disabled={!filePaths?.length} onClick={() => setActiveTab('files')} />
             <TabButton id="bookmarks" icon={bookmarks.length > 0 ? BookmarkCheck : Bookmark} label="Bookmarks" count={bookmarks.length} active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} />
           </div>
           {activeTab === "report" && (
@@ -448,7 +431,12 @@ function AnalysisOutput({
               <TLDRCard summary={tldrSummary} repoSlug={repoSlug} />
             )}
             <article ref={articleRef} className="prose-custom prose prose-invert prose-sm max-w-none p-8 sm:p-10 rounded-2xl bg-panel/50 border border-edge">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={{ code: CodeBlock as any }}
+              >
+                {markdown}
+              </ReactMarkdown>
             </article>
           </>
         )}
@@ -464,6 +452,7 @@ function AnalysisOutput({
         {activeTab === 'quality' && qualityReport && <CodeQualityDashboard report={qualityReport} />}
         {activeTab === 'license' && licenseReport && <LicenseDashboard report={licenseReport} />}
         {activeTab === 'deploy' && deployReport && <DeployFlowDashboard report={deployReport} />}
+        {activeTab === 'files' && filePaths && <FileTree nodes={buildFileTree(filePaths)} />}
 
         {/* Bookmarks Panel */}
         {activeTab === 'bookmarks' && (
@@ -546,28 +535,12 @@ function AnalysisOutput({
             >
               {copied ? "✓ Copied!" : "Copy Markdown"}
             </button>
-            <button
-              onClick={handleDownloadMarkdown}
-              className="text-xs px-4 py-2 rounded-lg bg-gold text-midnight font-semibold hover:bg-gold-bright transition-colors"
-            >
-              Download .md
-            </button>
+            <ExportMenu markdown={markdown} repoSlug={repoSlug} />
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 export default AnalysisOutput;

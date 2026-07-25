@@ -3,11 +3,11 @@
  *
  * Extracts the most informative first sentences from each major section
  * and synthesizes them into a short 5-bullet summary card. Runs entirely
- * client-side — no extra API calls needed.
+ * client-side â€” no extra API calls needed.
  */
 
 export interface TLDRSummary {
-  /** 3–5 key insight bullet points extracted from the report */
+  /** 3â€“5 key insight bullet points extracted from the report */
   bullets: string[];
   /** File paths mentioned most frequently across the report */
   keyFiles: string[];
@@ -30,6 +30,8 @@ export function extractFirstSentence(text: string): string {
     .replace(/`[^`]*`/g, '')
     .replace(/!\[.*?\]\(.*?\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
     .replace(/^[#>*\-+]\s*/gm, '')
     .replace(/\n+/g, ' ')
     .replace(/\s{2,}/g, ' ')
@@ -87,7 +89,9 @@ export function detectPrimaryLanguage(markdown: string): string | null {
   // Count mentions of each language
   const counts = new Map<string, number>();
   for (const lang of LANGUAGES) {
-    const regex = new RegExp(`\\b${lang}\\b`, 'gi');
+    const escapedLang = lang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // For C++ and C#, \b doesn't work well because + and # are non-word characters.
+    const regex = new RegExp(`(?:^|\\s)${escapedLang}(?=$|\\s|[.,;!?])`, 'gi');
     const matches = markdown.match(regex);
     if (matches && matches.length > 0) {
       counts.set(lang, matches.length);
